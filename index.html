@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="index.css" />
     <script type="module" src="index.tsx"></script>
-  </head>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.22.0"
+  }
+}
+</script>
+</head>
   <body>
     <header class="navbar">
       <div class="container">
@@ -19,91 +26,7 @@
     </header>
 
     <main id="main-content">
-      <section class="hero">
-        <div class="container">
-          <h1>AI-Powered Roof Reports in Minutes</h1>
-          <p class="subtitle">
-            Stop climbing ladders. Get precise roof measurements, material estimates, and professional reports with a single click.
-          </p>
-          <button class="btn btn-primary btn-large" id="signup-hero-btn">
-            Get Your First Report Free
-          </button>
-        </div>
-      </section>
-
-      <section class="features">
-        <div class="container">
-          <h2>Everything a Modern Roofer Needs</h2>
-          <div class="features-grid">
-            <div class="feature-card">
-              <h3>AI-Powered Measurements</h3>
-              <p>
-                Just enter an address. Our AI generates a detailed 3D model with precise measurements for area, pitch, ridges, and valleys.
-              </p>
-            </div>
-            <div class="feature-card">
-              <h3>Material Estimation</h3>
-              <p>
-                Automatically calculate the required materials, from shingles and underlayment to nails and waste factor. Save time and reduce errors.
-              </p>
-            </div>
-            <div class="feature-card">
-              <h3>Professional Reports</h3>
-              <p>
-                Generate beautiful, client-ready PDF reports with your branding, complete measurements, and a 3D view of the property.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="pricing">
-        <div class="container">
-          <h2>Simple, Transparent Pricing</h2>
-          <p class="pricing-subtitle">Choose a plan that scales with your business.</p>
-          <div class="pricing-grid">
-            <div class="pricing-card">
-              <h3>Pay-Per-Report</h3>
-              <p class="price"><span>$12</span>/report</p>
-              <p class="pricing-card-description">Perfect for occasional use or getting started.</p>
-              <ul>
-                <li>Full Measurement Report</li>
-                <li>3D Model Visualization</li>
-                <li>Material Estimate</li>
-                <li>Email Support</li>
-              </ul>
-              <button class="btn">Choose Plan</button>
-            </div>
-            <div class="pricing-card popular">
-              <span class="popular-badge">Most Popular</span>
-              <h3>Pro Monthly</h3>
-              <p class="price"><span>$49</span>/month</p>
-              <p class="pricing-card-description">For growing businesses that need regular reports.</p>
-              <ul>
-                <li><strong>20</strong> Reports/Month</li>
-                <li>Full Measurement Report</li>
-                <li>3D Model Visualization</li>
-                <li>Material Estimate</li>
-                <li>Priority Email Support</li>
-              </ul>
-              <button class="btn btn-primary">Choose Plan</button>
-            </div>
-            <div class="pricing-card">
-              <h3>Business Monthly</h3>
-              <p class="price"><span>$99</span>/month</p>
-              <p class="pricing-card-description">Unlimited reports for high-volume contractors.</p>
-              <ul>
-                <li><strong>Unlimited</strong> Reports</li>
-                <li>Full Measurement Report</li>
-                <li>3D Model Visualization</li>
-                <li>Material Estimate</li>
-                <li>Phone &amp; Email Support</li>
-              </ul>
-              <button class="btn">Choose Plan</button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <!-- App content will be rendered here -->
     </main>
 
     <footer class="footer">
