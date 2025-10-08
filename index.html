@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <title>ContractorFlow - The App for Modern Contractors</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="index.css" />
+    <script type="module" src="index.tsx"></script>
+  </head>
+  <body>
+    <header class="navbar">
+      <div class="container">
+        <a href="#" class="logo">ContractorFlow</a>
+        <nav>
+          <button class="btn btn-primary" id="signup-nav-btn">
+            Create Account
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero">
+        <div class="container">
+          <h1>Build Your Business, Not Your Paperwork</h1>
+          <p class="subtitle">
+            The all-in-one platform for contractors to manage projects, create
+            quotes, and get paid faster.
+          </p>
+          <button class="btn btn-primary btn-large" id="signup-hero-btn">
+            Get Started for Free
+          </button>
+        </div>
+      </section>
+
+      <section class="features">
+        <div class="container">
+          <h2>Everything You Need to Succeed</h2>
+          <div class="features-grid">
+            <div class="feature-card">
+              <h3>Effortless Quoting</h3>
+              <p>
+                Create and send professional, accurate quotes in minutes, right
+                from your phone or desktop.
+              </p>
+            </div>
+            <div class="feature-card">
+              <h3>Project Management</h3>
+              <p>
+                Track job progress, manage your crew, and keep everything
+                organized from start to finish.
+              </p>
+            </div>
+            <div class="feature-card">
+              <h3>Seamless Invoicing</h3>
+              <p>
+                Generate invoices automatically and accept online payments to
+                improve your cash flow.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <p>&copy; 2025 ContractorFlow. All rights reserved.</p>
+      </div>
+    </footer>
+
+    <!-- Sign-up Modal -->
+    <div class="modal-overlay hidden" id="signup-modal-overlay">
+      <div class="modal">
+        <button class="modal-close-btn" aria-label="Close sign up form">
+          &times;
+        </button>
+        <h2>Create Your Account</h2>
+        <form id="signup-form">
+          <div class="form-group">
+            <label for="full-name">Full Name</label>
+            <input type="text" id="full-name" required />
+          </div>
+          <div class="form-group">
+            <label for="company-name">Company Name</label>
+            <input type="text" id="company-name" required />
+          </div>
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" required />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" required />
+          </div>
+          <button type="submit" class="btn btn-primary btn-full-width">
+            Sign Up
+          </button>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>
