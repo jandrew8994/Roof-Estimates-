@@ -100,6 +100,26 @@ body {
     border-color: #a0c7ff;
 }
 
+.btn-secondary {
+    background-color: transparent;
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+}
+
+.btn-secondary:hover {
+    background-color: #e6f2ff; /* A very light blue */
+    border-color: var(--primary-hover-color);
+    color: var(--primary-hover-color);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(20, 121, 255, 0.1);
+}
+
+.btn-secondary:disabled {
+    background-color: transparent;
+    border-color: #ccc;
+    color: #ccc;
+}
+
 
 .btn-large {
   font-size: 1.1rem;
@@ -508,6 +528,10 @@ body {
 .report-actions {
     text-align: center;
     margin-top: 3em;
+    display: flex;
+    justify-content: center;
+    gap: 1.5em;
+    align-items: center;
 }
 
 @media (max-width: 768px) {

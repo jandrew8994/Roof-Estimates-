@@ -1,5 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+// --- TYPE DECLARATIONS FOR CDN LIBRARIES ---
+declare const html2canvas: any;
+declare global {
+    interface Window {
+        jspdf: any;
+    }
+}
+
+
 // --- DOM ELEMENT REFERENCES ---
 const mainContent = document.getElementById('main-content') as HTMLElement;
 const signUpNavBtn = document.getElementById('signup-nav-btn') as HTMLButtonElement;
@@ -260,7 +269,6 @@ function createRoofVisualizationSVG(measurements: Record<string, string>): strin
     `;
 }
 
-
 /**
  * Renders the final report view with the image and measurements.
  * @param address The address for the report.
@@ -304,6 +312,7 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
                     </div>
                 </div>
                 <div class="report-actions">
+                    <button id="download-pdf-btn" class="btn btn-secondary btn-large">Download PDF</button>
                     <button id="start-new-report-btn" class="btn btn-primary btn-large">Start New Report</button>
                 </div>
             </div>
@@ -311,6 +320,7 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
     `;
     
     document.getElementById('start-new-report-btn')?.addEventListener('click', renderAddressInput);
+    document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(address, imageUrl, measurements));
 }
 
 
@@ -343,6 +353,107 @@ async function handleAddressSubmit(e: Event) {
         console.error('Failed to get roof report:', error);
         alert('Sorry, we could not generate a report for that address. Please try again.');
         renderAddressInput(); // Go back to the input form on error
+    }
+}
+
+/**
+ * Generates and downloads a PDF of the roof report.
+ * @param address The property address.
+ * @param imageUrl The URL of the satellite image.
+ * @param measurements The roof measurement data.
+ */
+async function handleDownloadPdf(address: string, imageUrl: string, measurements: Record<string, string>) {
+    const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
+    if (downloadButton) {
+        downloadButton.disabled = true;
+        downloadButton.textContent = 'Downloading...';
+    }
+
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'p', unit: 'px', format: 'a4' });
+        const autoTable = (doc as any).autoTable;
+
+        const MARGIN = 40;
+        const PAGE_WIDTH = doc.internal.pageSize.getWidth();
+        const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+        let cursorY = MARGIN;
+
+        const checkPageBreak = (currentY: number, itemHeight: number) => {
+            if (currentY + itemHeight > doc.internal.pageSize.getHeight() - MARGIN) {
+                doc.addPage();
+                return MARGIN;
+            }
+            return currentY;
+        };
+
+        // --- PDF Header ---
+        doc.setFontSize(22);
+        doc.setFont(undefined, 'bold');
+        doc.text('Roof Measurement Report', PAGE_WIDTH / 2, cursorY, { align: 'center' });
+        cursorY += 30;
+        doc.setFontSize(12);
+        doc.setFont(undefined, 'normal');
+        doc.text(`Property Address: ${address}`, MARGIN, cursorY);
+        cursorY += 30;
+
+        // --- Satellite Image ---
+        const imgWidth = CONTENT_WIDTH;
+        const imgHeight = CONTENT_WIDTH; // Assuming 1:1 aspect ratio
+        doc.addImage(imageUrl, 'JPEG', MARGIN, cursorY, imgWidth, imgHeight);
+        cursorY += imgHeight + 20;
+
+        cursorY = checkPageBreak(cursorY, 200);
+
+        // --- Roof Visualization ---
+        const visualizationEl = document.querySelector('.roof-visualization-container') as HTMLElement;
+        if (visualizationEl) {
+            doc.setFontSize(16);
+            doc.setFont(undefined, 'bold');
+            doc.text('Roof Diagram', MARGIN, cursorY);
+            cursorY += 15;
+
+            const canvas = await html2canvas(visualizationEl, { scale: 2 });
+            const vizImgData = canvas.toDataURL('image/png');
+            const vizAspectRatio = canvas.height / canvas.width;
+            const vizImgWidth = CONTENT_WIDTH;
+            const vizImgHeight = vizImgWidth * vizAspectRatio;
+
+            doc.addImage(vizImgData, 'PNG', MARGIN, cursorY, vizImgWidth, vizImgHeight);
+            cursorY += vizImgHeight + 30;
+        }
+
+        cursorY = checkPageBreak(cursorY, 150);
+
+        // --- Measurements Table ---
+        doc.setFontSize(16);
+        doc.setFont(undefined, 'bold');
+        doc.text('Measurement Details', MARGIN, cursorY);
+        cursorY += 15;
+
+        const measurementRowsData = [
+            { label: 'Total Area', key: 'totalArea' }, { label: 'Primary Pitch', key: 'pitch' },
+            { label: 'Ridges', key: 'ridges' }, { label: 'Valleys', key: 'valleys' },
+            { label: 'Eaves', key: 'eaves' }, { label: 'Rakes', key: 'rakes' },
+            { label: 'Waste Factor', key: 'wasteFactor' },
+        ];
+        const tableBody = measurementRowsData.map(row => [row.label, measurements[row.key] || 'N/A']);
+        autoTable({
+            head: [['Measurement', 'Value']], body: tableBody, startY: cursorY,
+            theme: 'grid', headStyles: { fillColor: [20, 121, 255] }, margin: { left: MARGIN }
+        });
+
+        // --- Save PDF ---
+        doc.save(`Roof-Report-${address.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
+
+    } catch (error) {
+        console.error("Failed to generate PDF:", error);
+        alert("Sorry, there was an error creating the PDF. Please try again.");
+    } finally {
+        if (downloadButton) {
+            downloadButton.disabled = false;
+            downloadButton.textContent = 'Download PDF';
+        }
     }
 }
 
