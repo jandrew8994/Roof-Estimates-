@@ -204,6 +204,64 @@ function renderLoadingView() {
 }
 
 /**
+ * Creates a simple 2D SVG visualization of the roof.
+ * @param measurements The measurement data object.
+ * @returns An SVG string.
+ */
+function createRoofVisualizationSVG(measurements: Record<string, string>): string {
+    // Parse numeric values from measurement strings, providing defaults if parsing fails
+    const ridgeLength = parseFloat(measurements.ridges) || 100;
+    // Assuming eaves length is for two sides of a simple gable roof
+    const roofDepth = (parseFloat(measurements.eaves) || 200) / 2;
+    const pitchParts = (measurements.pitch || '6/12').split('/').map(p => parseFloat(p));
+    const rise = pitchParts[0] || 6;
+    const run = pitchParts[1] || 12;
+
+    // Define dimensions for the SVG elements
+    const svgWidth = 400;
+    const svgHeight = 250;
+    
+    // Top-down view dimensions
+    const rectWidth = 200;
+    const rectHeight = (roofDepth / ridgeLength) * rectWidth; // Maintain aspect ratio
+    const rectX = 30;
+    const rectY = 60;
+    
+    // Pitch triangle view dimensions
+    const triBase = 100;
+    const triHeight = (rise / run) * triBase;
+    const triX = 270;
+    const triY = rectY + rectHeight; // Align bottom of triangle with bottom of rect
+    
+    const textStyle = `font-family: var(--body-font); font-size: 12px; fill: #4a5568;`;
+    const dimensionStyle = `font-family: var(--body-font); font-size: 14px; font-weight: 600; fill: #1a202c;`;
+    const shapeStyle = `fill: #e2e8f0; stroke: #a0aec0; stroke-width: 1.5;`;
+
+    return `
+      <svg viewBox="0 0 ${svgWidth} ${svgHeight}" xmlns="http://www.w3.org/2000/svg" aria-labelledby="visTitle" role="img">
+        <title id="visTitle">2D Roof Diagram</title>
+        
+        <text x="${svgWidth / 2}" y="25" text-anchor="middle" style="${dimensionStyle.replace('14px', '16px')}">Roof Diagram</text>
+
+        <!-- Top-Down View -->
+        <text x="${rectX + rectWidth / 2}" y="${rectY - 10}" text-anchor="middle" style="${textStyle}">Top-Down View</text>
+        <rect x="${rectX}" y="${rectY}" width="${rectWidth}" height="${rectHeight}" style="${shapeStyle}" rx="4" />
+        <text x="${rectX + rectWidth / 2}" y="${rectY + rectHeight + 20}" text-anchor="middle" style="${dimensionStyle}">${ridgeLength} ft (Ridge)</text>
+        <text x="${rectX - 10}" y="${rectY + rectHeight / 2}" text-anchor="end" dominant-baseline="middle" style="${dimensionStyle}" transform="rotate(-90, ${rectX - 10}, ${rectY + rectHeight / 2})">${roofDepth.toFixed(1)} ft</text>
+
+        <!-- Pitch View -->
+        <text x="${triX + triBase / 2}" y="${rectY - 10}" text-anchor="middle" style="${textStyle}">Pitch: ${rise}/${run}</text>
+        <polygon points="${triX},${triY} ${triX + triBase},${triY} ${triX + triBase},${triY - triHeight}" style="${shapeStyle}" />
+        <line x1="${triX}" y1="${triY}" x2="${triX + triBase}" y2="${triY}" stroke="#4a5568" stroke-dasharray="2,2" />
+        <line x1="${triX + triBase}" y1="${triY}" x2="${triX + triBase}" y2="${triY - triHeight}" stroke="#4a5568" stroke-dasharray="2,2" />
+        <text x="${triX + triBase / 2}" y="${triY + 15}" text-anchor="middle" style="${textStyle}">${run}" Run</text>
+        <text x="${triX + triBase + 10}" y="${triY - triHeight / 2}" dominant-baseline="middle" style="${textStyle}">${rise}" Rise</text>
+      </svg>
+    `;
+}
+
+
+/**
  * Renders the final report view with the image and measurements.
  * @param address The address for the report.
  * @param imageUrl The URL of the generated satellite image.
@@ -230,6 +288,9 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
                     </div>
                     <div class="report-details-container">
                         <h2>Roof Measurement Details</h2>
+                        <div class="roof-visualization-container" aria-hidden="true">
+                            ${createRoofVisualizationSVG(measurements)}
+                        </div>
                         <table class="measurements-table">
                             <tbody>
                                 ${measurementRows.map(row => `
