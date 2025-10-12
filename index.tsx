@@ -8,16 +8,47 @@ declare global {
     }
 }
 
+// --- TYPE DEFINITIONS ---
+type Measurements = {
+    totalArea: string;
+    pitch: string;
+    ridges: string;
+    valleys: string;
+    eaves: string;
+    rakes: string;
+    wasteFactor: string;
+};
+
+type Report = {
+    id: number;
+    address: string;
+    imageUrl: string;
+    measurements: Measurements;
+    timestamp: string;
+};
+
+type Profile = {
+    companyName: string;
+    companyAddress: string;
+    logoDataUrl: string;
+};
+
 
 // --- DOM ELEMENT REFERENCES ---
 const mainContent = document.getElementById('main-content') as HTMLElement;
+const navLinks = document.querySelector('.nav-links') as HTMLElement;
 const signUpNavBtn = document.getElementById('signup-nav-btn') as HTMLButtonElement;
+const historyNavBtn = document.getElementById('history-nav-btn') as HTMLButtonElement;
+const logoLink = document.getElementById('logo-link') as HTMLAnchorElement;
 const modalOverlay = document.getElementById('signup-modal-overlay') as HTMLDivElement;
 const closeModalBtn = document.querySelector('.modal-close-btn') as HTMLButtonElement;
 const signUpForm = document.getElementById('signup-form') as HTMLFormElement;
 
+
 // --- STATE ---
 let ai: GoogleGenAI | null = null;
+const REPORT_HISTORY_KEY = 'roofReportHistory';
+const PROFILE_DATA_KEY = 'contractorProfile';
 
 // --- API & BUSINESS LOGIC ---
 
@@ -79,6 +110,63 @@ async function getRoofReport(address: string) {
 
   return { imageUrl, measurements };
 }
+
+/**
+ * Retrieves the report history from localStorage.
+ * @returns An array of Report objects.
+ */
+function getReportHistory(): Report[] {
+    const historyJson = localStorage.getItem(REPORT_HISTORY_KEY);
+    return historyJson ? JSON.parse(historyJson) : [];
+}
+
+/**
+ * Saves a new report to the localStorage history.
+ * @param report The new report object to save.
+ * @returns The newly created report object with ID and timestamp.
+ */
+function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp'>): Report {
+    const history = getReportHistory();
+    const newReport: Report = {
+        ...report,
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+    };
+    history.unshift(newReport); // Add to the beginning
+    localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
+    return newReport;
+}
+
+/**
+ * Updates an existing report in the localStorage history.
+ * @param updatedReport The report object with updated details.
+ */
+function updateReportInHistory(updatedReport: Report) {
+    const history = getReportHistory();
+    const reportIndex = history.findIndex(r => r.id === updatedReport.id);
+    if (reportIndex !== -1) {
+        history[reportIndex] = updatedReport;
+        localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
+    }
+}
+
+/**
+ * Retrieves the user profile from localStorage.
+ * @returns A Profile object or null.
+ */
+function getProfileData(): Profile | null {
+    const profileJson = localStorage.getItem(PROFILE_DATA_KEY);
+    return profileJson ? JSON.parse(profileJson) : null;
+}
+
+/**
+ * Saves profile data to localStorage.
+ * @param profile The profile object to save.
+ */
+function saveProfileData(profile: Profile) {
+    localStorage.setItem(PROFILE_DATA_KEY, JSON.stringify(profile));
+}
+
 
 // --- UI RENDERING FUNCTIONS ---
 
@@ -217,7 +305,7 @@ function renderLoadingView() {
  * @param measurements The measurement data object.
  * @returns An SVG string.
  */
-function createRoofVisualizationSVG(measurements: Record<string, string>): string {
+function createRoofVisualizationSVG(measurements: Measurements): string {
     // Parse numeric values from measurement strings, providing defaults if parsing fails
     const ridgeLength = parseFloat(measurements.ridges) || 100;
     // Assuming eaves length is for two sides of a simple gable roof
@@ -271,11 +359,11 @@ function createRoofVisualizationSVG(measurements: Record<string, string>): strin
 
 /**
  * Renders the final report view with the image and measurements.
- * @param address The address for the report.
- * @param imageUrl The URL of the generated satellite image.
- * @param measurements The measurement data object.
+ * @param report The full report object to display.
  */
-function renderReportView(address: string, imageUrl: string, measurements: Record<string, string>) {
+function renderReportView(report: Report) {
+    const { address, imageUrl, measurements } = report;
+    
     const measurementRows = [
         { label: 'Total Area', key: 'totalArea' },
         { label: 'Primary Pitch', key: 'pitch' },
@@ -284,7 +372,7 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
         { label: 'Eaves', key: 'eaves' },
         { label: 'Rakes', key: 'rakes' },
         { label: 'Waste Factor', key: 'wasteFactor' },
-    ];
+    ] as const;
     
     mainContent.innerHTML = `
         <section class="report-view">
@@ -304,7 +392,9 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
                                 ${measurementRows.map(row => `
                                     <tr>
                                         <td><strong>${row.label}</strong></td>
-                                        <td>${measurements[row.key] || 'N/A'}</td>
+                                        <td data-key="${row.key}">
+                                            <span class="measurement-value">${measurements[row.key] || 'N/A'}</span>
+                                        </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -312,6 +402,7 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
                     </div>
                 </div>
                 <div class="report-actions">
+                    <button id="edit-report-btn" class="btn btn-secondary btn-large">Edit Details</button>
                     <button id="download-pdf-btn" class="btn btn-secondary btn-large">Download PDF</button>
                     <button id="start-new-report-btn" class="btn btn-primary btn-large">Start New Report</button>
                 </div>
@@ -320,11 +411,163 @@ function renderReportView(address: string, imageUrl: string, measurements: Recor
     `;
     
     document.getElementById('start-new-report-btn')?.addEventListener('click', renderAddressInput);
-    document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(address, imageUrl, measurements));
+    document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(report.address, report.imageUrl, report.measurements));
+    document.getElementById('edit-report-btn')?.addEventListener('click', () => handleToggleEditMode(true, report));
 }
 
+/**
+ * Renders the report history view.
+ */
+function renderHistoryView() {
+    const history = getReportHistory();
+
+    if (history.length === 0) {
+        mainContent.innerHTML = `
+            <section class="history-view">
+                <div class="container">
+                    <div class="empty-history-view">
+                        <h2>No Reports Found</h2>
+                        <p>You haven't generated any roof reports yet. Get started by creating your first one!</p>
+                        <button id="generate-first-report-btn" class="btn btn-primary btn-large">Generate New Report</button>
+                    </div>
+                </div>
+            </section>
+        `;
+        document.getElementById('generate-first-report-btn')?.addEventListener('click', renderAddressInput);
+        return;
+    }
+
+    mainContent.innerHTML = `
+        <section class="history-view">
+            <div class="container">
+                <h1>Your Report History</h1>
+                <div class="history-grid">
+                    ${history.map(report => `
+                        <div class="history-card" data-report-id="${report.id}">
+                            <div class="history-card-img-container">
+                                <img src="${report.imageUrl}" alt="Satellite view of ${report.address}" loading="lazy" />
+                            </div>
+                            <div class="history-card-content">
+                                <h3>${report.address}</h3>
+                                <p>Generated: ${new Date(report.timestamp).toLocaleDateString()}</p>
+                                <button class="btn btn-primary view-report-btn">View Report</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </section>
+    `;
+
+    document.querySelectorAll('.view-report-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const card = (e.target as HTMLElement).closest('.history-card');
+            const reportId = card?.getAttribute('data-report-id');
+            if (reportId) {
+                const reportToView = history.find(r => r.id === parseInt(reportId));
+                if (reportToView) {
+                    renderReportView(reportToView);
+                }
+            }
+        });
+    });
+}
+
+/**
+ * Renders the user profile view.
+ */
+function renderProfileView() {
+    const profile = getProfileData();
+    mainContent.innerHTML = `
+        <section class="profile-view">
+            <div class="container">
+                <div class="profile-form-container">
+                    <h1>Company Profile</h1>
+                    <p>This information will appear on your PDF reports.</p>
+                    <form id="profile-form">
+                        <div class="form-group">
+                            <label>Company Logo</label>
+                            <div class="logo-preview-container">
+                                ${profile?.logoDataUrl ? 
+                                    `<img src="${profile.logoDataUrl}" alt="Company Logo Preview" class="logo-preview-img">` : 
+                                    '<p class="logo-placeholder">No logo uploaded</p>'}
+                            </div>
+                            <label for="logo-input" class="btn btn-secondary">Upload Logo</label>
+                            <input type="file" id="logo-input" accept="image/png, image/jpeg" class="hidden-file-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="company-name-input">Company Name</label>
+                            <input type="text" id="company-name-input" value="${profile?.companyName || ''}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="company-address-input">Company Address</label>
+                            <textarea id="company-address-input" rows="3">${profile?.companyAddress || ''}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-large">Save Profile</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+    `;
+
+    const logoInput = document.getElementById('logo-input') as HTMLInputElement;
+    const previewContainer = document.querySelector('.logo-preview-container') as HTMLDivElement;
+    
+    logoInput?.addEventListener('change', () => {
+        const file = logoInput.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                previewContainer.innerHTML = `<img src="${event.target?.result}" alt="Company Logo Preview" class="logo-preview-img">`;
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    document.getElementById('profile-form')?.addEventListener('submit', handleProfileSave);
+}
 
 // --- EVENT HANDLERS ---
+
+/**
+ * Handles saving the user's profile data.
+ * @param e The form submission event.
+ */
+function handleProfileSave(e: Event) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const companyName = (form.querySelector('#company-name-input') as HTMLInputElement).value;
+    const companyAddress = (form.querySelector('#company-address-input') as HTMLTextAreaElement).value;
+    const logoInput = form.querySelector('#logo-input') as HTMLInputElement;
+
+    const currentProfile = getProfileData() || { companyName: '', companyAddress: '', logoDataUrl: '' };
+    const file = logoInput.files?.[0];
+
+    const showSaveConfirmation = () => {
+        const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+        const originalText = button.textContent;
+        button.textContent = 'Saved!';
+        button.disabled = true;
+        setTimeout(() => {
+            button.textContent = originalText;
+            button.disabled = false;
+        }, 1500);
+    };
+
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const logoDataUrl = event.target?.result as string;
+            saveProfileData({ companyName, companyAddress, logoDataUrl });
+            showSaveConfirmation();
+        };
+        reader.readAsDataURL(file);
+    } else {
+        saveProfileData({ ...currentProfile, companyName, companyAddress });
+        showSaveConfirmation();
+    }
+}
+
 
 /**
  * Handles the submission of the address form.
@@ -348,7 +591,8 @@ async function handleAddressSubmit(e: Event) {
 
     try {
         const { imageUrl, measurements } = await getRoofReport(address);
-        renderReportView(address, imageUrl, measurements);
+        const newReport = saveReportToHistory({ address, imageUrl, measurements });
+        renderReportView(newReport);
     } catch (error) {
         console.error('Failed to get roof report:', error);
         alert('Sorry, we could not generate a report for that address. Please try again.');
@@ -357,12 +601,69 @@ async function handleAddressSubmit(e: Event) {
 }
 
 /**
+ * Toggles the report view between showing static text and editable input fields.
+ * @param isEditing True to switch to edit mode, false to switch back.
+ * @param report The report data object.
+ */
+function handleToggleEditMode(isEditing: boolean, report: Report) {
+    const tableCells = document.querySelectorAll('.measurements-table td[data-key]');
+    const actionsContainer = document.querySelector('.report-actions');
+    
+    if (isEditing && actionsContainer) {
+        tableCells.forEach(cell => {
+            const key = cell.getAttribute('data-key') as keyof Measurements;
+            const value = report.measurements[key] || '';
+            const valueSpan = cell.querySelector('.measurement-value');
+            if(valueSpan) {
+                valueSpan.outerHTML = `<input type="text" class="measurement-input" value="${value}" />`;
+            }
+        });
+
+        actionsContainer.innerHTML = `
+            <button id="cancel-edit-btn" class="btn btn-secondary btn-large">Cancel</button>
+            <button id="save-changes-btn" class="btn btn-primary btn-large">Save Changes</button>
+        `;
+        document.getElementById('save-changes-btn')?.addEventListener('click', () => handleSaveChanges(report));
+        document.getElementById('cancel-edit-btn')?.addEventListener('click', () => renderReportView(report));
+    }
+}
+
+/**
+ * Saves the edited measurement values from the input fields.
+ * @param originalReport The report object before edits.
+ */
+function handleSaveChanges(originalReport: Report) {
+    const newMeasurements: Partial<Measurements> = {};
+    const inputElements = document.querySelectorAll('.measurement-input');
+
+    inputElements.forEach(el => {
+        const input = el as HTMLInputElement;
+        const cell = input.closest('td[data-key]');
+        const key = cell?.getAttribute('data-key') as keyof Measurements;
+        if (key) {
+            newMeasurements[key] = input.value;
+        }
+    });
+
+    const updatedReport: Report = {
+        ...originalReport,
+        measurements: {
+            ...originalReport.measurements,
+            ...newMeasurements
+        }
+    };
+
+    updateReportInHistory(updatedReport);
+    renderReportView(updatedReport); // Re-render with saved data
+}
+
+/**
  * Generates and downloads a PDF of the roof report.
  * @param address The property address.
  * @param imageUrl The URL of the satellite image.
  * @param measurements The roof measurement data.
  */
-async function handleDownloadPdf(address: string, imageUrl: string, measurements: Record<string, string>) {
+async function handleDownloadPdf(address: string, imageUrl: string, measurements: Measurements) {
     const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
     if (downloadButton) {
         downloadButton.disabled = true;
@@ -374,10 +675,46 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
         const doc = new jsPDF({ orientation: 'p', unit: 'px', format: 'a4' });
         const autoTable = (doc as any).autoTable;
 
+        const profile = getProfileData();
         const MARGIN = 40;
         const PAGE_WIDTH = doc.internal.pageSize.getWidth();
         const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
         let cursorY = MARGIN;
+
+        // --- PDF Header with Profile Info ---
+        if (profile) {
+            const hasLogo = profile.logoDataUrl && profile.logoDataUrl.startsWith('data:image');
+            
+            if (hasLogo) {
+                try {
+                    const img = new Image();
+                    img.src = profile.logoDataUrl;
+                    await new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = reject;
+                    });
+                    const logoHeight = 40;
+                    const logoWidth = (img.width * logoHeight) / img.height;
+                    doc.addImage(profile.logoDataUrl, 'PNG', MARGIN, cursorY, logoWidth, logoHeight);
+                } catch (e) {
+                    console.error("Could not load profile logo for PDF:", e);
+                }
+            }
+
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            doc.setFont(undefined, 'bold');
+            doc.text(profile.companyName || '', PAGE_WIDTH - MARGIN, cursorY + 5, { align: 'right' });
+            doc.setFont(undefined, 'normal');
+            
+            const addressLines = doc.splitTextToSize(profile.companyAddress || '', 120);
+            doc.text(addressLines, PAGE_WIDTH - MARGIN, cursorY + 18, { align: 'right' });
+            
+            cursorY += 60; // Add space after the header
+            doc.setDrawColor(226, 232, 240); // --border-color
+            doc.line(MARGIN, cursorY - 10, PAGE_WIDTH - MARGIN, cursorY - 10); // Separator line
+        }
+
 
         const checkPageBreak = (currentY: number, itemHeight: number) => {
             if (currentY + itemHeight > doc.internal.pageSize.getHeight() - MARGIN) {
@@ -387,7 +724,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
             return currentY;
         };
 
-        // --- PDF Header ---
+        // --- PDF Main Title ---
         doc.setFontSize(22);
         doc.setFont(undefined, 'bold');
         doc.text('Roof Measurement Report', PAGE_WIDTH / 2, cursorY, { align: 'center' });
@@ -436,7 +773,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
             { label: 'Ridges', key: 'ridges' }, { label: 'Valleys', key: 'valleys' },
             { label: 'Eaves', key: 'eaves' }, { label: 'Rakes', key: 'rakes' },
             { label: 'Waste Factor', key: 'wasteFactor' },
-        ];
+        ] as const;
         const tableBody = measurementRowsData.map(row => [row.label, measurements[row.key] || 'N/A']);
         autoTable({
             head: [['Measurement', 'Value']], body: tableBody, startY: cursorY,
@@ -458,7 +795,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
 }
 
 
-// --- MODAL LOGIC ---
+// --- MODAL & SESSION LOGIC ---
 function openModal() {
   modalOverlay.classList.remove('hidden');
 }
@@ -467,8 +804,33 @@ function closeModal() {
   modalOverlay.classList.add('hidden');
 }
 
+function updateNavForLoggedInUser() {
+    if (!document.getElementById('profile-nav-btn')) {
+        const profileNavBtn = document.createElement('button');
+        profileNavBtn.id = 'profile-nav-btn';
+        profileNavBtn.className = 'btn btn-secondary';
+        profileNavBtn.textContent = 'Profile';
+        profileNavBtn.addEventListener('click', renderProfileView);
+        navLinks.insertBefore(profileNavBtn, signUpNavBtn);
+    }
+    
+    signUpNavBtn.textContent = 'New Report';
+    signUpNavBtn.classList.remove('btn-primary');
+    signUpNavBtn.classList.add('btn-secondary'); // Match other nav buttons
+    signUpNavBtn.onclick = renderAddressInput; // Change action to go directly to generator
+    historyNavBtn.classList.remove('hidden');
+}
 
 // --- INITIALIZATION ---
+
+/**
+ * Checks for a user session and updates the UI accordingly.
+ */
+function initializeSession() {
+    if (localStorage.getItem('contractorUserName')) {
+        updateNavForLoggedInUser();
+    }
+}
 
 // Event listener for the sign-up form submission
 signUpForm.addEventListener('submit', (e) => {
@@ -478,9 +840,9 @@ signUpForm.addEventListener('submit', (e) => {
   
   // Store user name to persist "session"
   localStorage.setItem('contractorUserName', userName);
-
+  
   closeModal();
-
+  updateNavForLoggedInUser();
   renderAddressInput(); // Go to the main app feature after signup
 });
 
@@ -502,5 +864,18 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// Add event listeners for history and logo
+historyNavBtn.addEventListener('click', renderHistoryView);
+logoLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (localStorage.getItem('contractorUserName')) {
+        renderAddressInput();
+    } else {
+        renderLandingPage();
+    }
+});
+
+
 // Initial page load
+initializeSession();
 renderLandingPage();
