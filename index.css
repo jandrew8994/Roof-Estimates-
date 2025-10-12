@@ -105,6 +105,28 @@ body {
     box-shadow: none;
 }
 
+.btn.loading {
+    cursor: wait;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.5em;
+  position: relative;
+  top: -1px; /* visual alignment */
+}
+
+.btn-secondary.loading .btn-spinner {
+    border-color: rgba(20, 121, 255, 0.3);
+    border-top-color: var(--primary-color);
+}
 
 .btn-primary {
   background-color: var(--primary-color);

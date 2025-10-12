@@ -172,6 +172,28 @@ function saveProfileData(profile: Profile) {
     localStorage.setItem(PROFILE_DATA_KEY, JSON.stringify(profile));
 }
 
+/**
+ * Toggles a button's state to indicate loading.
+ * @param button The button element.
+ * @param isLoading True to show loading, false to revert.
+ * @param loadingText The text to display while loading.
+ */
+function setButtonLoadingState(button: HTMLButtonElement, isLoading: boolean, loadingText: string) {
+    if (isLoading) {
+        button.disabled = true;
+        button.classList.add('loading');
+        button.dataset.originalText = button.innerHTML;
+        button.innerHTML = `<span class="btn-spinner"></span> ${loadingText}`;
+    } else {
+        button.disabled = false;
+        button.classList.remove('loading');
+        if (button.dataset.originalText) {
+            button.innerHTML = button.dataset.originalText;
+            delete button.dataset.originalText;
+        }
+    }
+}
+
 
 // --- UI RENDERING FUNCTIONS ---
 
@@ -581,21 +603,26 @@ function handleHistorySearch(e: Event) {
 function handleProfileSave(e: Event) {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
+    const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     const companyName = (form.querySelector('#company-name-input') as HTMLInputElement).value;
     const companyAddress = (form.querySelector('#company-address-input') as HTMLTextAreaElement).value;
     const logoInput = form.querySelector('#logo-input') as HTMLInputElement;
 
     const currentProfile = getProfileData() || { companyName: '', companyAddress: '', logoDataUrl: '' };
     const file = logoInput.files?.[0];
+    
+    setButtonLoadingState(button, true, 'Saving...');
 
-    const showSaveConfirmation = () => {
-        const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
-        const originalText = button.textContent;
-        button.textContent = 'Saved!';
-        button.disabled = true;
+    const onSaveSuccess = (newProfile: Profile) => {
+        saveProfileData(newProfile);
+        const originalText = button.dataset.originalText || 'Save Profile';
+        button.innerHTML = 'Saved!';
+        // Keep it disabled for the confirmation message
         setTimeout(() => {
-            button.textContent = originalText;
+            button.innerHTML = originalText;
             button.disabled = false;
+            button.classList.remove('loading');
+            delete button.dataset.originalText;
         }, 1500);
     };
 
@@ -603,13 +630,18 @@ function handleProfileSave(e: Event) {
         const reader = new FileReader();
         reader.onload = (event) => {
             const logoDataUrl = event.target?.result as string;
-            saveProfileData({ companyName, companyAddress, logoDataUrl });
-            showSaveConfirmation();
+            onSaveSuccess({ companyName, companyAddress, logoDataUrl });
+        };
+        reader.onerror = () => {
+            setButtonLoadingState(button, false, ''); // Revert on error
+            alert('Error reading the logo file. Please try again.');
         };
         reader.readAsDataURL(file);
     } else {
-        saveProfileData({ ...currentProfile, companyName, companyAddress });
-        showSaveConfirmation();
+        // Simulate a short delay for UX consistency
+        setTimeout(() => {
+            onSaveSuccess({ ...currentProfile, companyName, companyAddress });
+        }, 300);
     }
 }
 
@@ -630,8 +662,7 @@ async function handleAddressSubmit(e: Event) {
         return;
     }
     
-    button.disabled = true;
-    button.textContent = 'Generating...';
+    setButtonLoadingState(button, true, 'Generating...');
     renderLoadingView();
 
     try {
@@ -678,6 +709,11 @@ function handleToggleEditMode(isEditing: boolean, report: Report) {
  * @param originalReport The report object before edits.
  */
 function handleSaveChanges(originalReport: Report) {
+    const saveButton = document.getElementById('save-changes-btn') as HTMLButtonElement;
+    if (saveButton) {
+        setButtonLoadingState(saveButton, true, 'Saving...');
+    }
+
     const newMeasurements: Partial<Measurements> = {};
     const inputElements = document.querySelectorAll('.measurement-input');
 
@@ -698,8 +734,11 @@ function handleSaveChanges(originalReport: Report) {
         }
     };
 
-    updateReportInHistory(updatedReport);
-    renderReportView(updatedReport); // Re-render with saved data
+    // Simulate a short delay to make the spinner visible for this fast operation
+    setTimeout(() => {
+        updateReportInHistory(updatedReport);
+        renderReportView(updatedReport); // Re-render with saved data
+    }, 300);
 }
 
 /**
@@ -710,10 +749,9 @@ function handleSaveChanges(originalReport: Report) {
  */
 async function handleDownloadPdf(address: string, imageUrl: string, measurements: Measurements) {
     const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
-    if (downloadButton) {
-        downloadButton.disabled = true;
-        downloadButton.textContent = 'Downloading...';
-    }
+    if (!downloadButton) return;
+    
+    setButtonLoadingState(downloadButton, true, 'Downloading...');
 
     try {
         const { jsPDF } = window.jspdf;
@@ -836,10 +874,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
         console.error("Failed to generate PDF:", error);
         alert("Sorry, there was an error creating the PDF. Please try again.");
     } finally {
-        if (downloadButton) {
-            downloadButton.disabled = false;
-            downloadButton.textContent = 'Download PDF';
-        }
+        setButtonLoadingState(downloadButton, false, '');
     }
 }
 
