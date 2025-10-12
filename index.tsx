@@ -38,7 +38,8 @@ type Profile = {
 const mainContent = document.getElementById('main-content') as HTMLElement;
 const navLinks = document.querySelector('.nav-links') as HTMLElement;
 const signUpNavBtn = document.getElementById('signup-nav-btn') as HTMLButtonElement;
-const historyNavBtn = document.getElementById('history-nav-btn') as HTMLButtonElement;
+const historyNavLink = document.getElementById('history-nav-link') as HTMLButtonElement;
+const profileNavLink = document.getElementById('profile-nav-link') as HTMLButtonElement;
 const logoLink = document.getElementById('logo-link') as HTMLAnchorElement;
 const modalOverlay = document.getElementById('signup-modal-overlay') as HTMLDivElement;
 const closeModalBtn = document.querySelector('.modal-close-btn') as HTMLButtonElement;
@@ -134,6 +135,10 @@ function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp'>): Report {
     };
     history.unshift(newReport); // Add to the beginning
     localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
+    
+    // Show history link if it's not already visible
+    historyNavLink.classList.remove('hidden');
+    
     return newReport;
 }
 
@@ -441,6 +446,9 @@ function renderHistoryView() {
         <section class="history-view">
             <div class="container">
                 <h1>Your Report History</h1>
+                <div class="history-search-container">
+                    <input type="search" id="history-search-input" placeholder="Search by address..." aria-label="Search reports by address">
+                </div>
                 <div class="history-grid">
                     ${history.map(report => `
                         <div class="history-card" data-report-id="${report.id}">
@@ -454,6 +462,10 @@ function renderHistoryView() {
                             </div>
                         </div>
                     `).join('')}
+                </div>
+                <div id="no-results-message" class="empty-history-view hidden">
+                  <h2>No Matching Reports</h2>
+                  <p>Try searching for a different address.</p>
                 </div>
             </div>
         </section>
@@ -471,6 +483,9 @@ function renderHistoryView() {
             }
         });
     });
+
+    const searchInput = document.getElementById('history-search-input');
+    searchInput?.addEventListener('input', handleHistorySearch);
 }
 
 /**
@@ -528,6 +543,36 @@ function renderProfileView() {
 }
 
 // --- EVENT HANDLERS ---
+
+/**
+ * Handles filtering the report history based on user input.
+ * @param e The input event from the search field.
+ */
+function handleHistorySearch(e: Event) {
+    const searchTerm = (e.target as HTMLInputElement).value.toLowerCase();
+    const cards = document.querySelectorAll('.history-card');
+    const noResultsMessage = document.getElementById('no-results-message');
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+        const cardElement = card as HTMLElement;
+        const address = cardElement.querySelector('h3')?.textContent?.toLowerCase() || '';
+        if (address.includes(searchTerm)) {
+            cardElement.style.display = 'flex';
+            visibleCount++;
+        } else {
+            cardElement.style.display = 'none';
+        }
+    });
+
+    if (noResultsMessage) {
+        if (visibleCount === 0) {
+            noResultsMessage.classList.remove('hidden');
+        } else {
+            noResultsMessage.classList.add('hidden');
+        }
+    }
+}
 
 /**
  * Handles saving the user's profile data.
@@ -693,9 +738,13 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
                         img.onload = resolve;
                         img.onerror = reject;
                     });
+                    
+                    // Dynamically determine image format from data URL (e.g., 'image/jpeg' -> 'JPEG')
+                    const imageFormat = profile.logoDataUrl.split(';')[0].split('/')[1].toUpperCase();
+
                     const logoHeight = 40;
                     const logoWidth = (img.width * logoHeight) / img.height;
-                    doc.addImage(profile.logoDataUrl, 'PNG', MARGIN, cursorY, logoWidth, logoHeight);
+                    doc.addImage(profile.logoDataUrl, imageFormat, MARGIN, cursorY, logoWidth, logoHeight);
                 } catch (e) {
                     console.error("Could not load profile logo for PDF:", e);
                 }
@@ -795,87 +844,74 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
 }
 
 
-// --- MODAL & SESSION LOGIC ---
-function openModal() {
-  modalOverlay.classList.remove('hidden');
-}
-
-function closeModal() {
-  modalOverlay.classList.add('hidden');
-}
-
-function updateNavForLoggedInUser() {
-    if (!document.getElementById('profile-nav-btn')) {
-        const profileNavBtn = document.createElement('button');
-        profileNavBtn.id = 'profile-nav-btn';
-        profileNavBtn.className = 'btn btn-secondary';
-        profileNavBtn.textContent = 'Profile';
-        profileNavBtn.addEventListener('click', renderProfileView);
-        navLinks.insertBefore(profileNavBtn, signUpNavBtn);
-    }
-    
-    signUpNavBtn.textContent = 'New Report';
-    signUpNavBtn.classList.remove('btn-primary');
-    signUpNavBtn.classList.add('btn-secondary'); // Match other nav buttons
-    signUpNavBtn.onclick = renderAddressInput; // Change action to go directly to generator
-    historyNavBtn.classList.remove('hidden');
-}
-
-// --- INITIALIZATION ---
+// --- APP INITIALIZATION & NAVIGATION ---
 
 /**
- * Checks for a user session and updates the UI accordingly.
+ * Shows the signup modal.
  */
-function initializeSession() {
-    if (localStorage.getItem('contractorUserName')) {
-        updateNavForLoggedInUser();
+function openModal() {
+    modalOverlay.classList.remove('hidden');
+}
+
+/**
+ * Hides the signup modal.
+ */
+function closeModal() {
+    modalOverlay.classList.add('hidden');
+}
+
+/**
+ * Handles the signup form submission, transitioning the user into the app.
+ * @param e The form submission event.
+ */
+function handleSignUpFormSubmit(e: Event) {
+    e.preventDefault();
+    closeModal();
+    renderAddressInput();
+
+    // Update nav to reflect "logged-in" state
+    signUpNavBtn.textContent = 'New Report';
+    signUpNavBtn.removeEventListener('click', openModal);
+    signUpNavBtn.addEventListener('click', renderAddressInput);
+
+    profileNavLink.classList.remove('hidden');
+    
+    if (getReportHistory().length > 0) {
+        historyNavLink.classList.remove('hidden');
     }
 }
 
-// Event listener for the sign-up form submission
-signUpForm.addEventListener('submit', (e) => {
-  e.preventDefault(); 
-  const nameInput = document.getElementById('full-name') as HTMLInputElement;
-  const userName = nameInput.value.trim();
-  
-  // Store user name to persist "session"
-  localStorage.setItem('contractorUserName', userName);
-  
-  closeModal();
-  updateNavForLoggedInUser();
-  renderAddressInput(); // Go to the main app feature after signup
-});
-
-// Add event listeners for opening the modal
-signUpNavBtn.addEventListener('click', openModal);
-
-// Add event listeners for closing the modal
-closeModalBtn.addEventListener('click', closeModal);
-modalOverlay.addEventListener('click', (e) => {
-  if (e.target === modalOverlay) {
-    closeModal();
-  }
-});
-
-// Also close the modal with the Escape key
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !modalOverlay.classList.contains('hidden')) {
-    closeModal();
-  }
-});
-
-// Add event listeners for history and logo
-historyNavBtn.addEventListener('click', renderHistoryView);
-logoLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    if (localStorage.getItem('contractorUserName')) {
-        renderAddressInput();
-    } else {
+/**
+ * Initializes the application, sets up static event listeners.
+ */
+function init() {
+    // Main navigation
+    logoLink.addEventListener('click', (e) => {
+        e.preventDefault();
         renderLandingPage();
-    }
-});
+    });
+    historyNavLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        renderHistoryView();
+    });
+    profileNavLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        renderProfileView();
+    });
 
+    // Modal and signup flow
+    signUpNavBtn.addEventListener('click', openModal);
+    closeModalBtn.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) {
+            closeModal();
+        }
+    });
+    signUpForm.addEventListener('submit', handleSignUpFormSubmit);
+    
+    // Initial render
+    renderLandingPage();
+}
 
-// Initial page load
-initializeSession();
-renderLandingPage();
+// Start the app
+init();
