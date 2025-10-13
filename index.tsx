@@ -19,12 +19,25 @@ type Measurements = {
     wasteFactor: string;
 };
 
+type CustomSection = {
+    id: string;
+    title: string;
+};
+
+type Template = {
+    id: number;
+    name: string;
+    customSections: CustomSection[];
+};
+
 type Report = {
     id: number;
     address: string;
     imageUrl: string;
     measurements: Measurements;
     timestamp: string;
+    templateId?: number;
+    customData?: Record<string, string>; // Maps CustomSection.id to its content
 };
 
 type Profile = {
@@ -39,6 +52,7 @@ const mainContent = document.getElementById('main-content') as HTMLElement;
 const navLinks = document.querySelector('.nav-links') as HTMLElement;
 const signUpNavBtn = document.getElementById('signup-nav-btn') as HTMLButtonElement;
 const historyNavLink = document.getElementById('history-nav-link') as HTMLButtonElement;
+const templatesNavLink = document.getElementById('templates-nav-link') as HTMLButtonElement;
 const profileNavLink = document.getElementById('profile-nav-link') as HTMLButtonElement;
 const logoLink = document.getElementById('logo-link') as HTMLAnchorElement;
 const modalOverlay = document.getElementById('signup-modal-overlay') as HTMLDivElement;
@@ -50,6 +64,7 @@ const signUpForm = document.getElementById('signup-form') as HTMLFormElement;
 let ai: GoogleGenAI | null = null;
 const REPORT_HISTORY_KEY = 'roofReportHistory';
 const PROFILE_DATA_KEY = 'contractorProfile';
+const TEMPLATE_DATA_KEY = 'reportTemplates';
 
 // --- API & BUSINESS LOGIC ---
 
@@ -126,21 +141,32 @@ function getReportHistory(): Report[] {
  * @param report The new report object to save.
  * @returns The newly created report object with ID and timestamp.
  */
-function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp'>): Report {
+function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customData'>): Report {
     const history = getReportHistory();
     const newReport: Report = {
         ...report,
         id: Date.now(),
         timestamp: new Date().toISOString(),
+        customData: {}
     };
+
+    if (report.templateId) {
+        const template = getTemplates().find(t => t.id === report.templateId);
+        if (template) {
+            template.customSections.forEach(section => {
+                newReport.customData![section.id] = ''; // Initialize custom data fields
+            });
+        }
+    }
+
     history.unshift(newReport); // Add to the beginning
     localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
     
-    // Show history link if it's not already visible
     historyNavLink.classList.remove('hidden');
     
     return newReport;
 }
+
 
 /**
  * Updates an existing report in the localStorage history.
@@ -154,6 +180,54 @@ function updateReportInHistory(updatedReport: Report) {
         localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
     }
 }
+
+/**
+ * Retrieves templates from localStorage.
+ * @returns An array of Template objects.
+ */
+function getTemplates(): Template[] {
+    const templatesJson = localStorage.getItem(TEMPLATE_DATA_KEY);
+    return templatesJson ? JSON.parse(templatesJson) : [];
+}
+
+/**
+ * Saves a template to localStorage. Handles both create and update.
+ * @param template The template to save.
+ */
+function saveTemplate(template: Omit<Template, 'id'> | Template): Template {
+    const templates = getTemplates();
+    if ('id' in template && template.id) {
+        // Update
+        const index = templates.findIndex(t => t.id === template.id);
+        if (index > -1) {
+            templates[index] = template;
+        } else {
+            templates.unshift(template); // Should not happen but good fallback
+        }
+        localStorage.setItem(TEMPLATE_DATA_KEY, JSON.stringify(templates));
+        return template;
+    } else {
+        // Create
+        const newTemplate: Template = {
+            ...(template as Omit<Template, 'id'>),
+            id: Date.now(),
+        };
+        templates.unshift(newTemplate);
+        localStorage.setItem(TEMPLATE_DATA_KEY, JSON.stringify(templates));
+        return newTemplate;
+    }
+}
+
+/**
+ * Deletes a template from localStorage.
+ * @param templateId The ID of the template to delete.
+ */
+function deleteTemplate(templateId: number) {
+    let templates = getTemplates();
+    templates = templates.filter(t => t.id !== templateId);
+    localStorage.setItem(TEMPLATE_DATA_KEY, JSON.stringify(templates));
+}
+
 
 /**
  * Retrieves the user profile from localStorage.
@@ -297,23 +371,35 @@ function renderLandingPage() {
  * Renders the view for entering a property address.
  */
 function renderAddressInput() {
-  mainContent.innerHTML = `
-    <section class="report-generator-view">
-        <div class="container">
-            <div class="address-form-container">
-                <h1>Generate a New Roof Report</h1>
-                <p>Enter the property address below to get started.</p>
-                <form id="address-form">
-                    <input type="text" id="address-input" placeholder="e.g., 123 Maple St, Anytown, USA" required />
-                    <button type="submit" class="btn btn-primary btn-large">Get Report</button>
-                </form>
+    const templates = getTemplates();
+    mainContent.innerHTML = `
+        <section class="report-generator-view">
+            <div class="container">
+                <div class="address-form-container">
+                    <h1>Generate a New Roof Report</h1>
+                    <p>Enter the property address below to get started.</p>
+                    <form id="address-form">
+                        <div class="form-group">
+                            <label for="address-input">Property Address</label>
+                            <input type="text" id="address-input" placeholder="e.g., 123 Maple St, Anytown, USA" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="template-select">Report Template (Optional)</label>
+                            <select id="template-select">
+                                <option value="">Default Report</option>
+                                ${templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-large">Get Report</button>
+                    </form>
+                </div>
             </div>
-        </div>
-    </section>
-  `;
+        </section>
+    `;
 
-  document.getElementById('address-form')?.addEventListener('submit', handleAddressSubmit);
+    document.getElementById('address-form')?.addEventListener('submit', handleAddressSubmit);
 }
+
 
 /**
  * Renders the loading state while the API is being called.
@@ -389,7 +475,7 @@ function createRoofVisualizationSVG(measurements: Measurements): string {
  * @param report The full report object to display.
  */
 function renderReportView(report: Report) {
-    const { address, imageUrl, measurements } = report;
+    const { address, imageUrl, measurements, templateId, customData } = report;
     
     const measurementRows = [
         { label: 'Total Area', key: 'totalArea' },
@@ -400,6 +486,26 @@ function renderReportView(report: Report) {
         { label: 'Rakes', key: 'rakes' },
         { label: 'Waste Factor', key: 'wasteFactor' },
     ] as const;
+
+    let customSectionsHtml = '';
+    if (templateId) {
+        const template = getTemplates().find(t => t.id === templateId);
+        if (template) {
+            customSectionsHtml = `
+                <div class="custom-sections-container">
+                    <h2 class="custom-sections-title">${template.name} - Custom Notes</h2>
+                    ${template.customSections.map(section => `
+                        <div class="custom-section">
+                            <h3>${section.title}</h3>
+                            <div class="custom-section-content" data-section-id="${section.id}">
+                                <p>${(customData?.[section.id] || 'No notes added yet.').replace(/\n/g, '<br>')}</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    }
     
     mainContent.innerHTML = `
         <section class="report-view">
@@ -428,6 +534,7 @@ function renderReportView(report: Report) {
                         </table>
                     </div>
                 </div>
+                ${customSectionsHtml}
                 <div class="report-actions">
                     <button id="edit-report-btn" class="btn btn-secondary btn-large">Edit Details</button>
                     <button id="download-pdf-btn" class="btn btn-secondary btn-large">Download PDF</button>
@@ -438,7 +545,7 @@ function renderReportView(report: Report) {
     `;
     
     document.getElementById('start-new-report-btn')?.addEventListener('click', renderAddressInput);
-    document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(report.address, report.imageUrl, report.measurements));
+    document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(report));
     document.getElementById('edit-report-btn')?.addEventListener('click', () => handleToggleEditMode(true, report));
 }
 
@@ -511,6 +618,140 @@ function renderHistoryView() {
 }
 
 /**
+ * Renders the template management view.
+ */
+function renderTemplatesView() {
+    const templates = getTemplates();
+    if (templates.length === 0) {
+        mainContent.innerHTML = `
+            <section class="history-view">
+                <div class="container">
+                    <div class="empty-history-view">
+                        <h2>No Templates Found</h2>
+                        <p>Templates allow you to add custom sections like checklists or notes to your reports.</p>
+                        <button id="create-first-template-btn" class="btn btn-primary btn-large">Create Your First Template</button>
+                    </div>
+                </div>
+            </section>
+        `;
+        document.getElementById('create-first-template-btn')?.addEventListener('click', () => renderTemplateEditorView());
+        return;
+    }
+
+    mainContent.innerHTML = `
+        <section class="history-view">
+            <div class="container">
+                <div class="view-header">
+                    <h1>Report Templates</h1>
+                    <button id="create-new-template-btn" class="btn btn-primary">Create New Template</button>
+                </div>
+                <div class="templates-grid">
+                    ${templates.map(template => `
+                        <div class="template-card" data-template-id="${template.id}">
+                            <div class="template-card-content">
+                                <h3>${template.name}</h3>
+                                <p>${template.customSections.length} custom section(s)</p>
+                                <ul>
+                                    ${template.customSections.slice(0, 3).map(s => `<li>${s.title}</li>`).join('')}
+                                    ${template.customSections.length > 3 ? `<li>...and more</li>` : ''}
+                                </ul>
+                            </div>
+                            <div class="template-card-actions">
+                                <button class="btn btn-secondary edit-template-btn">Edit</button>
+                                <button class="btn btn-danger delete-template-btn">Delete</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </section>
+    `;
+
+    document.getElementById('create-new-template-btn')?.addEventListener('click', () => renderTemplateEditorView());
+    document.querySelectorAll('.edit-template-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            const card = (e.target as HTMLElement).closest('.template-card');
+            const templateId = Number(card?.getAttribute('data-template-id'));
+            const template = templates.find(t => t.id === templateId);
+            if(template) renderTemplateEditorView(template);
+        });
+    });
+    document.querySelectorAll('.delete-template-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            const card = (e.target as HTMLElement).closest('.template-card');
+            const templateId = Number(card?.getAttribute('data-template-id'));
+            if(confirm('Are you sure you want to delete this template? This cannot be undone.')) {
+                deleteTemplate(templateId);
+                renderTemplatesView();
+            }
+        });
+    });
+}
+
+/**
+ * Renders the form to create or edit a template.
+ * @param template Optional template object for editing.
+ */
+function renderTemplateEditorView(template?: Template) {
+    const isEditing = !!template;
+    mainContent.innerHTML = `
+    <section class="profile-view">
+        <div class="container">
+            <form class="profile-form-container" id="template-editor-form">
+                <h1>${isEditing ? 'Edit' : 'Create'} Report Template</h1>
+                <div class="form-group">
+                    <label for="template-name">Template Name</label>
+                    <input type="text" id="template-name" value="${template?.name || ''}" placeholder="e.g., Insurance Claim Report" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Custom Sections</label>
+                    <div id="custom-sections-list">
+                        ${template?.customSections.map(section => `
+                            <div class="custom-section-item" data-id="${section.id}">
+                                <input type="text" value="${section.title}" placeholder="Section Title (e.g., On-site Notes)" required>
+                                <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+                            </div>
+                        `).join('') || ''}
+                    </div>
+                    <button type="button" id="add-section-btn" class="btn btn-secondary">Add Section</button>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" id="cancel-template-edit" class="btn btn-secondary btn-large">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-large">Save Template</button>
+                </div>
+            </form>
+        </div>
+    </section>
+    `;
+
+    const sectionsList = document.getElementById('custom-sections-list') as HTMLDivElement;
+
+    const addSectionItem = (id = `new_${Date.now()}`, title = '') => {
+        const div = document.createElement('div');
+        div.className = 'custom-section-item';
+        div.dataset.id = id;
+        div.innerHTML = `
+            <input type="text" value="${title}" placeholder="Section Title (e.g., On-site Notes)" required>
+            <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+        `;
+        div.querySelector('.btn-remove-section')?.addEventListener('click', () => div.remove());
+        sectionsList.appendChild(div);
+        (div.querySelector('input') as HTMLInputElement).focus();
+    };
+
+    document.getElementById('add-section-btn')?.addEventListener('click', () => addSectionItem());
+    sectionsList.querySelectorAll('.btn-remove-section').forEach(btn => {
+        btn.addEventListener('click', () => (btn.parentElement as HTMLElement).remove());
+    });
+    
+    document.getElementById('cancel-template-edit')?.addEventListener('click', renderTemplatesView);
+    document.getElementById('template-editor-form')?.addEventListener('submit', (e) => handleTemplateSave(e, template?.id));
+}
+
+
+/**
  * Renders the user profile view.
  */
 function renderProfileView() {
@@ -565,6 +806,42 @@ function renderProfileView() {
 }
 
 // --- EVENT HANDLERS ---
+
+/**
+ * Handles saving or updating a report template.
+ * @param e The form submission event.
+ * @param templateId The ID of the template being edited, if any.
+ */
+function handleTemplateSave(e: Event, templateId?: number) {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const name = (form.querySelector('#template-name') as HTMLInputElement).value.trim();
+    if (!name) {
+        alert('Please enter a template name.');
+        return;
+    }
+    const sectionItems = form.querySelectorAll<HTMLDivElement>('.custom-section-item');
+    const customSections: CustomSection[] = [];
+
+    sectionItems.forEach(item => {
+        const title = (item.querySelector('input') as HTMLInputElement).value.trim();
+        if(title) {
+            customSections.push({
+                id: item.dataset.id!,
+                title: title
+            });
+        }
+    });
+
+    const templateData: Partial<Template> = { id: templateId, name, customSections };
+    if (!templateId) {
+      delete templateData.id;
+    }
+    
+    saveTemplate(templateData as Template);
+    renderTemplatesView();
+}
+
 
 /**
  * Handles filtering the report history based on user input.
@@ -654,8 +931,10 @@ async function handleAddressSubmit(e: Event) {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const input = form.querySelector('#address-input') as HTMLInputElement;
+    const templateSelect = form.querySelector('#template-select') as HTMLSelectElement;
     const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     const address = input.value.trim();
+    const templateId = templateSelect.value ? Number(templateSelect.value) : undefined;
 
     if (!address) {
         alert('Please enter a valid address.');
@@ -667,7 +946,7 @@ async function handleAddressSubmit(e: Event) {
 
     try {
         const { imageUrl, measurements } = await getRoofReport(address);
-        const newReport = saveReportToHistory({ address, imageUrl, measurements });
+        const newReport = saveReportToHistory({ address, imageUrl, measurements, templateId });
         renderReportView(newReport);
     } catch (error) {
         console.error('Failed to get roof report:', error);
@@ -684,6 +963,7 @@ async function handleAddressSubmit(e: Event) {
 function handleToggleEditMode(isEditing: boolean, report: Report) {
     const tableCells = document.querySelectorAll('.measurements-table td[data-key]');
     const actionsContainer = document.querySelector('.report-actions');
+    const customSectionsContainer = document.querySelector('.custom-sections-container');
     
     if (isEditing && actionsContainer) {
         tableCells.forEach(cell => {
@@ -694,6 +974,15 @@ function handleToggleEditMode(isEditing: boolean, report: Report) {
                 valueSpan.outerHTML = `<input type="text" class="measurement-input" value="${value}" />`;
             }
         });
+
+        if (report.templateId && customSectionsContainer) {
+            const contentDivs = customSectionsContainer.querySelectorAll<HTMLDivElement>('.custom-section-content');
+            contentDivs.forEach(div => {
+                const sectionId = div.dataset.sectionId!;
+                const content = report.customData?.[sectionId] || '';
+                div.innerHTML = `<textarea class="custom-section-textarea" data-section-id="${sectionId}" rows="5">${content}</textarea>`;
+            });
+        }
 
         actionsContainer.innerHTML = `
             <button id="cancel-edit-btn" class="btn btn-secondary btn-large">Cancel</button>
@@ -726,15 +1015,21 @@ function handleSaveChanges(originalReport: Report) {
         }
     });
 
+    const newCustomData: Record<string, string> = { ...originalReport.customData };
+    document.querySelectorAll<HTMLTextAreaElement>('.custom-section-textarea').forEach(textarea => {
+        const sectionId = textarea.dataset.sectionId!;
+        newCustomData[sectionId] = textarea.value;
+    });
+
     const updatedReport: Report = {
         ...originalReport,
         measurements: {
             ...originalReport.measurements,
             ...newMeasurements
-        }
+        },
+        customData: newCustomData
     };
 
-    // Simulate a short delay to make the spinner visible for this fast operation
     setTimeout(() => {
         updateReportInHistory(updatedReport);
         renderReportView(updatedReport); // Re-render with saved data
@@ -743,13 +1038,13 @@ function handleSaveChanges(originalReport: Report) {
 
 /**
  * Generates and downloads a PDF of the roof report.
- * @param address The property address.
- * @param imageUrl The URL of the satellite image.
- * @param measurements The roof measurement data.
+ * @param report The full report object.
  */
-async function handleDownloadPdf(address: string, imageUrl: string, measurements: Measurements) {
+async function handleDownloadPdf(report: Report) {
     const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
     if (!downloadButton) return;
+    
+    const { address, imageUrl, measurements, templateId, customData } = report;
     
     setButtonLoadingState(downloadButton, true, 'Downloading...');
 
@@ -776,10 +1071,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
                         img.onload = resolve;
                         img.onerror = reject;
                     });
-                    
-                    // Dynamically determine image format from data URL (e.g., 'image/jpeg' -> 'JPEG')
                     const imageFormat = profile.logoDataUrl.split(';')[0].split('/')[1].toUpperCase();
-
                     const logoHeight = 40;
                     const logoWidth = (img.width * logoHeight) / img.height;
                     doc.addImage(profile.logoDataUrl, imageFormat, MARGIN, cursorY, logoWidth, logoHeight);
@@ -789,7 +1081,6 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
             }
 
             doc.setFontSize(10);
-            doc.setFont(undefined, 'normal');
             doc.setFont(undefined, 'bold');
             doc.text(profile.companyName || '', PAGE_WIDTH - MARGIN, cursorY + 5, { align: 'right' });
             doc.setFont(undefined, 'normal');
@@ -797,11 +1088,10 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
             const addressLines = doc.splitTextToSize(profile.companyAddress || '', 120);
             doc.text(addressLines, PAGE_WIDTH - MARGIN, cursorY + 18, { align: 'right' });
             
-            cursorY += 60; // Add space after the header
-            doc.setDrawColor(226, 232, 240); // --border-color
-            doc.line(MARGIN, cursorY - 10, PAGE_WIDTH - MARGIN, cursorY - 10); // Separator line
+            cursorY += 60;
+            doc.setDrawColor(226, 232, 240);
+            doc.line(MARGIN, cursorY - 10, PAGE_WIDTH - MARGIN, cursorY - 10);
         }
-
 
         const checkPageBreak = (currentY: number, itemHeight: number) => {
             if (currentY + itemHeight > doc.internal.pageSize.getHeight() - MARGIN) {
@@ -823,7 +1113,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
 
         // --- Satellite Image ---
         const imgWidth = CONTENT_WIDTH;
-        const imgHeight = CONTENT_WIDTH; // Assuming 1:1 aspect ratio
+        const imgHeight = CONTENT_WIDTH;
         doc.addImage(imageUrl, 'JPEG', MARGIN, cursorY, imgWidth, imgHeight);
         cursorY += imgHeight + 20;
 
@@ -832,8 +1122,7 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
         // --- Roof Visualization ---
         const visualizationEl = document.querySelector('.roof-visualization-container') as HTMLElement;
         if (visualizationEl) {
-            doc.setFontSize(16);
-            doc.setFont(undefined, 'bold');
+            doc.setFontSize(16); doc.setFont(undefined, 'bold');
             doc.text('Roof Diagram', MARGIN, cursorY);
             cursorY += 15;
 
@@ -842,7 +1131,6 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
             const vizAspectRatio = canvas.height / canvas.width;
             const vizImgWidth = CONTENT_WIDTH;
             const vizImgHeight = vizImgWidth * vizAspectRatio;
-
             doc.addImage(vizImgData, 'PNG', MARGIN, cursorY, vizImgWidth, vizImgHeight);
             cursorY += vizImgHeight + 30;
         }
@@ -850,11 +1138,9 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
         cursorY = checkPageBreak(cursorY, 150);
 
         // --- Measurements Table ---
-        doc.setFontSize(16);
-        doc.setFont(undefined, 'bold');
+        doc.setFontSize(16); doc.setFont(undefined, 'bold');
         doc.text('Measurement Details', MARGIN, cursorY);
-        cursorY += 15;
-
+        
         const measurementRowsData = [
             { label: 'Total Area', key: 'totalArea' }, { label: 'Primary Pitch', key: 'pitch' },
             { label: 'Ridges', key: 'ridges' }, { label: 'Valleys', key: 'valleys' },
@@ -863,9 +1149,41 @@ async function handleDownloadPdf(address: string, imageUrl: string, measurements
         ] as const;
         const tableBody = measurementRowsData.map(row => [row.label, measurements[row.key] || 'N/A']);
         autoTable({
-            head: [['Measurement', 'Value']], body: tableBody, startY: cursorY,
+            head: [['Measurement', 'Value']], body: tableBody, startY: cursorY + 15,
             theme: 'grid', headStyles: { fillColor: [20, 121, 255] }, margin: { left: MARGIN }
         });
+        cursorY = (doc as any).lastAutoTable.finalY || cursorY;
+
+        // --- Custom Sections ---
+        if (templateId && customData) {
+            const template = getTemplates().find(t => t.id === templateId);
+            if (template && template.customSections.length > 0) {
+                cursorY = checkPageBreak(cursorY, 40);
+                cursorY += 30;
+                doc.setFontSize(16); doc.setFont(undefined, 'bold');
+                doc.text(`${template.name} - Custom Notes`, MARGIN, cursorY);
+                cursorY += 20;
+
+                template.customSections.forEach(section => {
+                    const content = customData[section.id];
+                    if (content) {
+                        cursorY = checkPageBreak(cursorY, 40);
+                        doc.setFontSize(12); doc.setFont(undefined, 'bold');
+                        doc.text(section.title, MARGIN, cursorY);
+                        cursorY += 15;
+                        doc.setFont(undefined, 'normal');
+                        const textLines = doc.splitTextToSize(content, CONTENT_WIDTH);
+                        textLines.forEach((line: string) => {
+                           cursorY = checkPageBreak(cursorY, 15);
+                           doc.text(line, MARGIN, cursorY);
+                           cursorY += 15;
+                        });
+                        cursorY += 10;
+                    }
+                });
+            }
+        }
+
 
         // --- Save PDF ---
         doc.save(`Roof-Report-${address.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
@@ -910,6 +1228,7 @@ function handleSignUpFormSubmit(e: Event) {
     signUpNavBtn.addEventListener('click', renderAddressInput);
 
     profileNavLink.classList.remove('hidden');
+    templatesNavLink.classList.remove('hidden');
     
     if (getReportHistory().length > 0) {
         historyNavLink.classList.remove('hidden');
@@ -928,6 +1247,10 @@ function init() {
     historyNavLink.addEventListener('click', (e) => {
         e.preventDefault();
         renderHistoryView();
+    });
+    templatesNavLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        renderTemplatesView();
     });
     profileNavLink.addEventListener('click', (e) => {
         e.preventDefault();

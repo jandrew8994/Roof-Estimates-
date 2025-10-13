@@ -1,6 +1,8 @@
 :root {
   --primary-color: #1479FF;
   --primary-hover-color: #0056b3;
+  --danger-color: #e53e3e;
+  --danger-hover-color: #c53030;
   --text-color: #2d3748;
   --background-color: #ffffff;
   --light-gray-color: #f7fafc;
@@ -165,6 +167,17 @@ body {
     color: #ccc;
 }
 
+.btn-danger {
+    background-color: transparent;
+    color: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.btn-danger:hover {
+    background-color: var(--danger-color);
+    color: white;
+    border-color: var(--danger-color);
+}
 
 .btn-large {
   font-size: 1.1rem;
@@ -407,7 +420,8 @@ body {
 }
 
 .form-group input,
-.form-group textarea {
+.form-group textarea,
+.form-group select {
   width: 100%;
   padding: 0.8em;
   border: 1px solid var(--border-color);
@@ -445,14 +459,13 @@ body {
     margin-top: 0;
 }
 
+.address-form-container .form-group {
+    text-align: left;
+}
+
 #address-input {
-    width: 100%;
-    padding: 1em;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
     font-size: 1.1rem;
-    box-sizing: border-box;
-    margin: 1.5em 0;
+    padding: 1em;
 }
 
 .loading-view {
@@ -501,6 +514,7 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 2.5em;
     text-align: left;
+    margin-bottom: 3em;
 }
 
 .report-image-container {
@@ -597,10 +611,17 @@ body {
     align-items: center;
 }
 
-/* --- HISTORY VIEW STYLES --- */
+/* --- HISTORY & TEMPLATE VIEW STYLES --- */
 
 .history-view {
     padding: 3em 0;
+}
+
+.view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5em;
 }
 
 .history-view h1 {
@@ -608,8 +629,11 @@ body {
     font-size: 2.5rem;
     font-weight: 800;
     text-align: center;
-    margin-bottom: 1.5em;
+    margin: 0;
     color: #1a202c;
+}
+.view-header h1 {
+    text-align: left;
 }
 
 .history-search-container {
@@ -637,13 +661,13 @@ body {
     box-shadow: 0 0 0 3px rgba(20, 121, 255, 0.2);
 }
 
-.history-grid {
+.history-grid, .templates-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 1.5em;
 }
 
-.history-card {
+.history-card, .template-card {
     border: 1px solid var(--border-color);
     border-radius: 12px;
     background: #fff;
@@ -654,7 +678,7 @@ body {
     flex-direction: column;
 }
 
-.history-card:hover {
+.history-card:hover, .template-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 8px 20px rgba(0,0,0,0.08);
 }
@@ -670,25 +694,42 @@ body {
     object-fit: cover;
 }
 
-.history-card-content {
+.history-card-content, .template-card-content {
     padding: 1.2em;
     flex-grow: 1;
     display: flex;
     flex-direction: column;
 }
 
-.history-card-content h3 {
+.history-card-content h3, .template-card-content h3 {
     font-size: 1.1rem;
     font-weight: 600;
     margin: 0 0 0.5em 0;
     line-height: 1.4;
 }
 
-.history-card-content p {
+.history-card-content p, .template-card-content p {
     font-size: 0.9rem;
     color: #718096;
     margin: 0;
+}
+
+.template-card-content ul {
+    font-size: 0.9rem;
+    color: #4a5568;
+    padding-left: 1.2em;
+    margin: 1em 0 0;
+}
+
+.template-card-actions {
+    display: flex;
+    gap: 0.5em;
+    padding: 0 1.2em 1.2em;
+}
+.template-card-actions .btn {
     flex-grow: 1;
+    font-size: 0.9rem;
+    padding: 0.6em;
 }
 
 .history-card .btn {
@@ -722,7 +763,7 @@ body {
     color: #718096;
 }
 
-/* --- PROFILE VIEW STYLES --- */
+/* --- PROFILE & TEMPLATE EDITOR VIEW STYLES --- */
 
 .profile-view {
     padding: 4em 0;
@@ -750,6 +791,55 @@ body {
     color: #4a5568;
     margin-bottom: 2em;
 }
+
+#custom-sections-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8em;
+    margin-bottom: 1em;
+}
+
+.custom-section-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.custom-section-item input {
+    flex-grow: 1;
+}
+
+.btn-remove-section {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--danger-color);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.btn-remove-section:hover {
+    background-color: var(--danger-color);
+    color: white;
+    border-color: var(--danger-color);
+}
+#add-section-btn {
+    font-size: 0.9rem;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1em;
+    margin-top: 2em;
+}
+
 
 .logo-preview-container {
     width: 120px;
@@ -793,6 +883,41 @@ body {
     margin: 1.5em auto 0;
 }
 
+.custom-sections-container {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2em;
+    background: #fff;
+}
+.custom-sections-title {
+    font-family: var(--heading-font);
+    font-size: 1.8rem;
+    margin-top: 0;
+    color: var(--primary-color);
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.5em;
+}
+.custom-section h3 {
+    margin: 1.5em 0 0.5em;
+    font-size: 1.2rem;
+}
+.custom-section-content p {
+    color: #4a5568;
+    white-space: pre-wrap;
+    background-color: var(--light-gray-color);
+    padding: 1em;
+    border-radius: 8px;
+    min-height: 1.6em;
+}
+.custom-section-textarea {
+    width: 100%;
+    padding: 0.8em;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: var(--body-font);
+    box-sizing: border-box;
+}
 
 .hidden {
     display: none !important;
@@ -802,5 +927,13 @@ body {
 @media (max-width: 768px) {
     .report-grid {
         grid-template-columns: 1fr;
+    }
+    .view-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1em;
+    }
+    .view-header h1 {
+        text-align: left;
     }
 }
