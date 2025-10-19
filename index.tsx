@@ -576,7 +576,7 @@ function renderHistoryView() {
             <div class="container">
                 <h1>Your Report History</h1>
                 <div class="history-search-container">
-                    <input type="search" id="history-search-input" placeholder="Search by address..." aria-label="Search reports by address">
+                    <input type="search" id="history-search-input" placeholder="Search by address or date..." aria-label="Search reports by address or date">
                 </div>
                 <div class="history-grid">
                     ${history.map(report => `
@@ -594,7 +594,7 @@ function renderHistoryView() {
                 </div>
                 <div id="no-results-message" class="empty-history-view hidden">
                   <h2>No Matching Reports</h2>
-                  <p>Try searching for a different address.</p>
+                  <p>Try searching for a different address or date.</p>
                 </div>
             </div>
         </section>
@@ -856,7 +856,8 @@ function handleHistorySearch(e: Event) {
     cards.forEach(card => {
         const cardElement = card as HTMLElement;
         const address = cardElement.querySelector('h3')?.textContent?.toLowerCase() || '';
-        if (address.includes(searchTerm)) {
+        const date = cardElement.querySelector('p')?.textContent?.toLowerCase() || '';
+        if (address.includes(searchTerm) || date.includes(searchTerm)) {
             cardElement.style.display = 'flex';
             visibleCount++;
         } else {

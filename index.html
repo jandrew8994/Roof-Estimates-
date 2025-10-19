@@ -72,5 +72,19 @@
         </form>
       </div>
     </div>
+
+    <!-- Share Report Modal -->
+    <div class="modal-overlay hidden" id="share-modal-overlay">
+        <div class="modal">
+            <button class="modal-close-btn" aria-label="Close share dialog">&times;</button>
+            <h2>Share Report</h2>
+            <p>Anyone with this link will be able to view a read-only version of this report.</p>
+            <div class="form-group">
+                <label for="share-link-input">Shareable Link</label>
+                <input type="text" id="share-link-input" readonly>
+            </div>
+            <button class="btn btn-primary btn-full-width" id="copy-link-btn">Copy Link</button>
+        </div>
+    </div>
   </body>
 </html>
