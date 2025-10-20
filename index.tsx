@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 
 // --- TYPE DECLARATIONS FOR CDN LIBRARIES ---
@@ -708,13 +709,32 @@ function renderTemplateEditorView(template?: Template) {
                     <label>Custom Sections</label>
                     <div id="custom-sections-list">
                         ${template?.customSections.map(section => `
-                            <div class="custom-section-item" data-id="${section.id}">
-                                <input type="text" value="${section.title}" placeholder="Section Title (e.g., On-site Notes)" required>
-                                <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+                            <div class="custom-section-item" data-id="${section.id}" draggable="true">
+                                <span class="drag-handle" aria-hidden="true">⠿</span>
+                                <span class="section-title-text">${section.title}</span>
+                                <input type="text" value="${section.title}" class="section-title-input hidden" required>
+                                <div class="section-item-actions">
+                                    <button type="button" class="btn-edit-section" aria-label="Edit section">Edit</button>
+                                    <button type="button" class="btn-save-section hidden" aria-label="Save section">Save</button>
+                                    <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+                                </div>
                             </div>
                         `).join('') || ''}
                     </div>
-                    <button type="button" id="add-section-btn" class="btn btn-secondary">Add Section</button>
+                    <div class="add-section-container">
+                        <label class="add-section-label">Add a section</label>
+                        <div class="quick-add-pills">
+                            <button type="button" class="quick-add-pill" data-title="On-site Notes">+ On-site Notes</button>
+                            <button type="button" class="quick-add-pill" data-title="Damage Assessment">+ Damage Assessment</button>
+                            <button type="button" class="quick-add-pill" data-title="Material Checklist">+ Material Checklist</button>
+                            <button type="button" class="quick-add-pill" data-title="Client Conversation Log">+ Client Log</button>
+                            <button type="button" class="quick-add-pill" data-title="Photo Log">+ Photo Log</button>
+                        </div>
+                        <form class="custom-add-section" id="custom-add-form">
+                            <input type="text" id="custom-section-input" placeholder="Or enter a custom section title...">
+                            <button type="submit" class="btn btn-secondary">Add</button>
+                        </form>
+                    </div>
                 </div>
 
                 <div class="form-actions">
@@ -728,22 +748,135 @@ function renderTemplateEditorView(template?: Template) {
 
     const sectionsList = document.getElementById('custom-sections-list') as HTMLDivElement;
 
+    const setupSectionItemEventListeners = (item: HTMLElement) => {
+        const textSpan = item.querySelector('.section-title-text') as HTMLSpanElement;
+        const input = item.querySelector('.section-title-input') as HTMLInputElement;
+        const editBtn = item.querySelector('.btn-edit-section') as HTMLButtonElement;
+        const saveBtn = item.querySelector('.btn-save-section') as HTMLButtonElement;
+        const removeBtn = item.querySelector('.btn-remove-section') as HTMLButtonElement;
+
+        const enterEditMode = () => {
+            textSpan.classList.add('hidden');
+            editBtn.classList.add('hidden');
+            input.classList.remove('hidden');
+            saveBtn.classList.remove('hidden');
+            input.value = textSpan.textContent || '';
+            input.select();
+        };
+
+        const exitEditMode = () => {
+            const newTitle = input.value.trim();
+            if (newTitle) {
+                textSpan.textContent = newTitle;
+                input.value = newTitle;
+            }
+            input.classList.add('hidden');
+            saveBtn.classList.add('hidden');
+            textSpan.classList.remove('hidden');
+            editBtn.classList.remove('hidden');
+        };
+
+        editBtn.addEventListener('click', enterEditMode);
+        saveBtn.addEventListener('click', exitEditMode);
+        removeBtn.addEventListener('click', () => item.remove());
+
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                exitEditMode();
+            } else if (e.key === 'Escape') {
+                exitEditMode();
+            }
+        });
+    };
+
     const addSectionItem = (id = `new_${Date.now()}`, title = '') => {
         const div = document.createElement('div');
         div.className = 'custom-section-item';
         div.dataset.id = id;
+        div.draggable = true;
         div.innerHTML = `
-            <input type="text" value="${title}" placeholder="Section Title (e.g., On-site Notes)" required>
-            <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+            <span class="drag-handle" aria-hidden="true">⠿</span>
+            <span class="section-title-text">${title || 'New Section'}</span>
+            <input type="text" value="${title}" class="section-title-input hidden" required>
+            <div class="section-item-actions">
+                <button type="button" class="btn-edit-section" aria-label="Edit section">Edit</button>
+                <button type="button" class="btn-save-section hidden" aria-label="Save section">Save</button>
+                <button type="button" class="btn-remove-section" aria-label="Remove section">&times;</button>
+            </div>
         `;
-        div.querySelector('.btn-remove-section')?.addEventListener('click', () => div.remove());
+        setupSectionItemEventListeners(div);
         sectionsList.appendChild(div);
-        (div.querySelector('input') as HTMLInputElement).focus();
+        if (!title) {
+            (div.querySelector('.btn-edit-section') as HTMLButtonElement).click();
+        }
     };
 
-    document.getElementById('add-section-btn')?.addEventListener('click', () => addSectionItem());
-    sectionsList.querySelectorAll('.btn-remove-section').forEach(btn => {
-        btn.addEventListener('click', () => (btn.parentElement as HTMLElement).remove());
+    sectionsList.querySelectorAll<HTMLElement>('.custom-section-item').forEach(setupSectionItemEventListeners);
+    
+    // Quick Add Pills
+    const quickAddPillsContainer = document.querySelector('.quick-add-pills');
+    quickAddPillsContainer?.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.classList.contains('quick-add-pill')) {
+            const title = target.dataset.title;
+            if (title) {
+                addSectionItem(undefined, title);
+            }
+        }
+    });
+
+    // Custom Add Form
+    const customAddForm = document.getElementById('custom-add-form') as HTMLFormElement;
+    customAddForm?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const customSectionInput = document.getElementById('custom-section-input') as HTMLInputElement;
+        const title = customSectionInput.value.trim();
+        if (title) {
+            addSectionItem(undefined, title);
+            customSectionInput.value = '';
+            customSectionInput.focus();
+        }
+    });
+
+    // --- Drag and Drop Logic ---
+    function getDragAfterElement(container: HTMLElement, y: number) {
+        const draggableElements = [...container.querySelectorAll<HTMLElement>('.custom-section-item:not(.dragging)')];
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY, element: null as (HTMLElement | null) }).element;
+    }
+
+    sectionsList.addEventListener('dragstart', e => {
+        const target = (e.target as HTMLElement).closest('.custom-section-item');
+        if (target) {
+            target.classList.add('dragging');
+        }
+    });
+
+    sectionsList.addEventListener('dragend', e => {
+        const target = (e.target as HTMLElement).closest('.custom-section-item');
+        if (target) {
+            target.classList.remove('dragging');
+        }
+    });
+
+    sectionsList.addEventListener('dragover', e => {
+        e.preventDefault();
+        const draggingItem = sectionsList.querySelector('.dragging');
+        if (!draggingItem) return;
+        const afterElement = getDragAfterElement(sectionsList, e.clientY);
+        if (afterElement == null) {
+            sectionsList.appendChild(draggingItem);
+        } else {
+            sectionsList.insertBefore(draggingItem, afterElement);
+        }
     });
     
     document.getElementById('cancel-template-edit')?.addEventListener('click', renderTemplatesView);
@@ -824,10 +957,15 @@ function handleTemplateSave(e: Event, templateId?: number) {
     const customSections: CustomSection[] = [];
 
     sectionItems.forEach(item => {
-        const title = (item.querySelector('input') as HTMLInputElement).value.trim();
+        const title = (item.querySelector('.section-title-input') as HTMLInputElement).value.trim();
         if(title) {
+            let sectionId = item.dataset.id!;
+            if (sectionId.startsWith('new_')) {
+                // Generate a more permanent-looking ID for new sections
+                sectionId = `s_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            }
             customSections.push({
-                id: item.dataset.id!,
+                id: sectionId,
                 title: title
             });
         }
@@ -1151,7 +1289,7 @@ async function handleDownloadPdf(report: Report) {
         const tableBody = measurementRowsData.map(row => [row.label, measurements[row.key] || 'N/A']);
         autoTable({
             head: [['Measurement', 'Value']], body: tableBody, startY: cursorY + 15,
-            theme: 'grid', headStyles: { fillColor: [20, 121, 255] }, margin: { left: MARGIN }
+            theme: 'grid', headStyles: { fillColor: [217, 4, 41] }, margin: { left: MARGIN }
         });
         cursorY = (doc as any).lastAutoTable.finalY || cursorY;
 
@@ -1224,7 +1362,8 @@ function handleSignUpFormSubmit(e: Event) {
     renderAddressInput();
 
     // Update nav to reflect "logged-in" state
-    signUpNavBtn.textContent = 'New Report';
+    signUpNav
+Btn.textContent = 'New Report';
     signUpNavBtn.removeEventListener('click', openModal);
     signUpNavBtn.addEventListener('click', renderAddressInput);
 
