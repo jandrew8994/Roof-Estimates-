@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
 // --- TYPE DECLARATIONS FOR CDN LIBRARIES ---
@@ -6,6 +5,7 @@ declare const html2canvas: any;
 declare global {
     interface Window {
         jspdf: any;
+        google: any; // For Google Maps API
     }
 }
 
@@ -18,6 +18,13 @@ type Measurements = {
     eaves: string;
     rakes: string;
     wasteFactor: string;
+};
+
+type VisualizationConfig = {
+    fillColor: string;
+    strokeColor: string;
+    textColor: string;
+    mutedTextColor: string;
 };
 
 type CustomSection = {
@@ -39,6 +46,7 @@ type Report = {
     timestamp: string;
     templateId?: number;
     customData?: Record<string, string>; // Maps CustomSection.id to its content
+    visualizationConfig?: VisualizationConfig;
 };
 
 type Profile = {
@@ -52,6 +60,7 @@ type Profile = {
 const mainContent = document.getElementById('main-content') as HTMLElement;
 const navLinks = document.querySelector('.nav-links') as HTMLElement;
 const signUpNavBtn = document.getElementById('signup-nav-btn') as HTMLButtonElement;
+const signInNavBtn = document.getElementById('signin-nav-btn') as HTMLButtonElement;
 const historyNavLink = document.getElementById('history-nav-link') as HTMLButtonElement;
 const templatesNavLink = document.getElementById('templates-nav-link') as HTMLButtonElement;
 const profileNavLink = document.getElementById('profile-nav-link') as HTMLButtonElement;
@@ -70,7 +79,7 @@ const TEMPLATE_DATA_KEY = 'reportTemplates';
 // --- API & BUSINESS LOGIC ---
 
 /**
- * Simulates fetching a roof report by calling the Gemini API.
+ * Fetches a roof report by calling the Gemini API with Google Maps grounding.
  * @param address The property address.
  * @returns An object containing the image URL and measurement data.
  */
@@ -94,13 +103,14 @@ async function getRoofReport(address: string) {
     required: ['totalArea', 'pitch', 'ridges', 'valleys', 'eaves', 'rakes', 'wasteFactor']
   };
 
-  // --- API Call for Measurements ---
+  // --- API Call for Measurements using Google Maps Grounding ---
   const measurementsPromise = ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: `Generate a realistic set of roof measurements for a typical single-family home at the address: ${address}.`,
+    contents: `Acting as a roof measurement specialist, use Google Maps data to provide precise roof measurements for the property at the address: ${address}. Provide all measurements in feet and follow the JSON schema.`,
     config: {
       responseMimeType: 'application/json',
       responseSchema: measurementSchema,
+      tools: [{ googleMaps: {} }], // Enable Google Maps grounding
     },
   });
 
@@ -128,6 +138,7 @@ async function getRoofReport(address: string) {
   return { imageUrl, measurements };
 }
 
+
 /**
  * Retrieves the report history from localStorage.
  * @returns An array of Report objects.
@@ -142,13 +153,19 @@ function getReportHistory(): Report[] {
  * @param report The new report object to save.
  * @returns The newly created report object with ID and timestamp.
  */
-function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customData'>): Report {
+function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customData' | 'visualizationConfig'>): Report {
     const history = getReportHistory();
     const newReport: Report = {
         ...report,
         id: Date.now(),
         timestamp: new Date().toISOString(),
-        customData: {}
+        customData: {},
+        visualizationConfig: {
+            fillColor: '#2D3748',
+            strokeColor: '#4A5568',
+            textColor: '#E2E8F0',
+            mutedTextColor: '#A0AEC0'
+        }
     };
 
     if (report.templateId) {
@@ -266,6 +283,38 @@ function setButtonLoadingState(button: HTMLButtonElement, isLoading: boolean, lo
             button.innerHTML = button.dataset.originalText;
             delete button.dataset.originalText;
         }
+    }
+}
+
+/**
+ * Fetches, saves, and displays a new roof report for a given address.
+ * @param address The property address.
+ * @param templateId The optional template ID to apply.
+ */
+async function generateAndDisplayReport(address: string, templateId?: number) {
+    // The address form and its button are only present in the address input view.
+    // We query for them here to trigger the loading state.
+    const addressForm = document.getElementById('address-form');
+    if (!addressForm) return;
+
+    const button = addressForm.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    if (!address || address.trim().length === 0) {
+        alert('Please enter a valid address.');
+        return;
+    }
+
+    setButtonLoadingState(button, true, 'Generating...');
+    renderLoadingView();
+
+    try {
+        const { imageUrl, measurements } = await getRoofReport(address);
+        const newReport = saveReportToHistory({ address, imageUrl, measurements, templateId });
+        renderReportView(newReport);
+    } catch (error) {
+        console.error('Failed to get roof report:', error);
+        alert('Sorry, we could not generate a report for that address. Please check the address and try again. This feature works best with specific street addresses.');
+        renderAddressInput(); // Go back to the input form on error
     }
 }
 
@@ -399,6 +448,34 @@ function renderAddressInput() {
     `;
 
     document.getElementById('address-form')?.addEventListener('submit', handleAddressSubmit);
+    
+    // --- Initialize Google Maps Autocomplete ---
+    const initAutocomplete = () => {
+        const addressInput = document.getElementById('address-input') as HTMLInputElement;
+        if (!addressInput) return;
+
+        // Check if the Google Maps script has loaded
+        if (window.google && window.google.maps && window.google.maps.places) {
+            const autocomplete = new window.google.maps.places.Autocomplete(addressInput, {
+                types: ['address'],
+                fields: ["formatted_address"]
+            });
+            autocomplete.addListener('place_changed', () => {
+                const place = autocomplete.getPlace();
+                if (place && place.formatted_address) {
+                    const address = place.formatted_address;
+                    const templateSelect = document.getElementById('template-select') as HTMLSelectElement;
+                    const templateId = templateSelect.value ? Number(templateSelect.value) : undefined;
+                    // The input value is already set by autocomplete, so we just need to trigger the report.
+                    generateAndDisplayReport(address, templateId);
+                }
+            });
+        } else {
+            // If not loaded, wait and try again
+            setTimeout(initAutocomplete, 200);
+        }
+    };
+    initAutocomplete();
 }
 
 
@@ -415,58 +492,89 @@ function renderLoadingView() {
 }
 
 /**
- * Creates a simple 2D SVG visualization of the roof.
+ * Creates an enhanced 2D SVG visualization of the roof with labeled parts.
  * @param measurements The measurement data object.
+ * @param config Optional color configuration object.
  * @returns An SVG string.
  */
-function createRoofVisualizationSVG(measurements: Measurements): string {
-    // Parse numeric values from measurement strings, providing defaults if parsing fails
-    const ridgeLength = parseFloat(measurements.ridges) || 100;
-    // Assuming eaves length is for two sides of a simple gable roof
-    const roofDepth = (parseFloat(measurements.eaves) || 200) / 2;
-    const pitchParts = (measurements.pitch || '6/12').split('/').map(p => parseFloat(p));
-    const rise = pitchParts[0] || 6;
-    const run = pitchParts[1] || 12;
+function createRoofVisualizationSVG(measurements: Measurements, config?: VisualizationConfig): string {
+    const colors: VisualizationConfig = {
+        fillColor: config?.fillColor || '#2D3748',
+        strokeColor: config?.strokeColor || '#4A5568',
+        textColor: config?.textColor || '#E2E8F0',
+        mutedTextColor: config?.mutedTextColor || '#A0AEC0',
+    };
 
-    // Define dimensions for the SVG elements
+    const ridge = measurements.ridges || 'N/A';
+    const eaves = measurements.eaves || 'N/A';
+    const rakes = measurements.rakes || 'N/A';
+    const pitch = measurements.pitch || 'N/A';
+
     const svgWidth = 400;
     const svgHeight = 250;
     
-    // Top-down view dimensions
-    const rectWidth = 200;
-    const rectHeight = (roofDepth / ridgeLength) * rectWidth; // Maintain aspect ratio
-    const rectX = 30;
-    const rectY = 60;
-    
-    // Pitch triangle view dimensions
-    const triBase = 100;
-    const triHeight = (rise / run) * triBase;
-    const triX = 270;
-    const triY = rectY + rectHeight; // Align bottom of triangle with bottom of rect
-    
-    const textStyle = `font-family: var(--body-font); font-size: 12px; fill: #4a5568;`;
-    const dimensionStyle = `font-family: var(--body-font); font-size: 14px; font-weight: 600; fill: #1a202c;`;
-    const shapeStyle = `fill: #e2e8f0; stroke: #a0aec0; stroke-width: 1.5;`;
+    // Coordinates for an isometric-style view of a simple gable roof
+    const centerX = svgWidth / 2;
+    const startY = 80;
+    const roofWidth = 240; // Represents ridge length
+    const roofSlopeHeight = 80; // Represents the length from eave to ridge on the gable end
+    const perspectiveYFactor = 0.4; // Controls the "flatness" of the perspective
+
+    const p = {
+        ridgeTop:    { x: centerX, y: startY },
+        ridgeBottom: { x: centerX, y: startY + roofWidth * perspectiveYFactor },
+        
+        leftEaveTop:    { x: centerX - roofSlopeHeight, y: startY + roofSlopeHeight * perspectiveYFactor },
+        leftEaveBottom: { x: centerX - roofSlopeHeight, y: startY + (roofWidth + roofSlopeHeight) * perspectiveYFactor },
+
+        rightEaveTop:    { x: centerX + roofSlopeHeight, y: startY + roofSlopeHeight * perspectiveYFactor },
+        rightEaveBottom: { x: centerX + roofSlopeHeight, y: startY + (roofWidth + roofSlopeHeight) * perspectiveYFactor },
+    };
+
+    const textStyle = `font-family: var(--body-font); font-size: 11px; fill: ${colors.mutedTextColor};`;
+    const labelStyle = `font-family: var(--body-font); font-size: 13px; font-weight: 600; fill: ${colors.textColor};`;
+    const shapeStyle = `fill: ${colors.fillColor}; stroke: ${colors.strokeColor}; stroke-width: 1.5; stroke-linejoin: round;`;
+    const lineStyle = `stroke: ${colors.mutedTextColor}; stroke-width: 1; stroke-dasharray: 3,3;`;
 
     return `
       <svg viewBox="0 0 ${svgWidth} ${svgHeight}" xmlns="http://www.w3.org/2000/svg" aria-labelledby="visTitle" role="img">
-        <title id="visTitle">2D Roof Diagram</title>
+        <title id="visTitle">Roof Diagram</title>
         
-        <text x="${svgWidth / 2}" y="25" text-anchor="middle" style="${dimensionStyle.replace('14px', '16px')}">Roof Diagram</text>
+        <text x="${svgWidth / 2}" y="30" text-anchor="middle" style="${labelStyle.replace('13px', '16px')}">Roof Diagram</text>
 
-        <!-- Top-Down View -->
-        <text x="${rectX + rectWidth / 2}" y="${rectY - 10}" text-anchor="middle" style="${textStyle}">Top-Down View</text>
-        <rect x="${rectX}" y="${rectY}" width="${rectWidth}" height="${rectHeight}" style="${shapeStyle}" rx="4" />
-        <text x="${rectX + rectWidth / 2}" y="${rectY + rectHeight + 20}" text-anchor="middle" style="${dimensionStyle}">${ridgeLength} ft (Ridge)</text>
-        <text x="${rectX - 10}" y="${rectY + rectHeight / 2}" text-anchor="end" dominant-baseline="middle" style="${dimensionStyle}" transform="rotate(-90, ${rectX - 10}, ${rectY + rectHeight / 2})">${roofDepth.toFixed(1)} ft</text>
+        <!-- Roof Planes -->
+        <polygon points="${p.ridgeTop.x},${p.ridgeTop.y} ${p.ridgeBottom.x},${p.ridgeBottom.y} ${p.leftEaveBottom.x},${p.leftEaveBottom.y} ${p.leftEaveTop.x},${p.leftEaveTop.y}" style="${shapeStyle}" />
+        <polygon points="${p.ridgeTop.x},${p.ridgeTop.y} ${p.ridgeBottom.x},${p.ridgeBottom.y} ${p.rightEaveBottom.x},${p.rightEaveBottom.y} ${p.rightEaveTop.x},${p.rightEaveTop.y}" style="${shapeStyle}" />
 
-        <!-- Pitch View -->
-        <text x="${triX + triBase / 2}" y="${rectY - 10}" text-anchor="middle" style="${textStyle}">Pitch: ${rise}/${run}</text>
-        <polygon points="${triX},${triY} ${triX + triBase},${triY} ${triX + triBase},${triY - triHeight}" style="${shapeStyle}" />
-        <line x1="${triX}" y1="${triY}" x2="${triX + triBase}" y2="${triY}" stroke="#4a5568" stroke-dasharray="2,2" />
-        <line x1="${triX + triBase}" y1="${triY}" x2="${triX + triBase}" y2="${triY - triHeight}" stroke="#4a5568" stroke-dasharray="2,2" />
-        <text x="${triX + triBase / 2}" y="${triY + 15}" text-anchor="middle" style="${textStyle}">${run}" Run</text>
-        <text x="${triX + triBase + 10}" y="${triY - triHeight / 2}" dominant-baseline="middle" style="${textStyle}">${rise}" Rise</text>
+        <!-- Labels and Dimension Lines -->
+
+        <!-- Ridge Label -->
+        <line x1="${p.ridgeTop.x}" y1="${p.ridgeTop.y}" x2="${p.ridgeTop.x - 40}" y2="${p.ridgeTop.y - 25}" style="${lineStyle}" />
+        <text x="${p.ridgeTop.x - 45}" y="${p.ridgeTop.y - 28}" text-anchor="end">
+          <tspan style="${labelStyle}">Ridge</tspan>
+          <tspan x="${p.ridgeTop.x - 45}" dy="1.2em" style="${textStyle}">${ridge}</tspan>
+        </text>
+
+        <!-- Eave Label -->
+        <line x1="${p.leftEaveBottom.x + 20}" y1="${p.leftEaveBottom.y}" x2="${p.leftEaveBottom.x + 20}" y2="${p.leftEaveBottom.y + 30}" style="${lineStyle}" />
+        <text x="${p.leftEaveBottom.x + 25}" y="${p.leftEaveBottom.y + 35}">
+          <tspan style="${labelStyle}">Eaves</tspan>
+          <tspan x="${p.leftEaveBottom.x + 25}" dy="1.2em" style="${textStyle}">${eaves}</tspan>
+        </text>
+
+        <!-- Rake Label -->
+        <line x1="${p.rightEaveBottom.x}" y1="${p.rightEaveBottom.y}" x2="${p.rightEaveBottom.x + 40}" y2="${p.rightEaveBottom.y + 15}" style="${lineStyle}" />
+        <text x="${p.rightEaveBottom.x + 45}" y="${p.rightEaveBottom.y + 18}">
+          <tspan style="${labelStyle}">Rakes</tspan>
+          <tspan x="${p.rightEaveBottom.x + 45}" dy="1.2em" style="${textStyle}">${rakes}</tspan>
+        </text>
+        
+        <!-- Pitch Label -->
+        <text x="${svgWidth / 2}" y="${svgHeight - 15}" text-anchor="middle">
+            <tspan style="${labelStyle}">Pitch: </tspan>
+            <tspan style="${textStyle}">${pitch}</tspan>
+        </text>
+
       </svg>
     `;
 }
@@ -476,7 +584,7 @@ function createRoofVisualizationSVG(measurements: Measurements): string {
  * @param report The full report object to display.
  */
 function renderReportView(report: Report) {
-    const { address, imageUrl, measurements, templateId, customData } = report;
+    const { address, imageUrl, measurements, templateId, customData, visualizationConfig } = report;
     
     const measurementRows = [
         { label: 'Total Area', key: 'totalArea' },
@@ -519,8 +627,9 @@ function renderReportView(report: Report) {
                     <div class="report-details-container">
                         <h2>Roof Measurement Details</h2>
                         <div class="roof-visualization-container" aria-hidden="true">
-                            ${createRoofVisualizationSVG(measurements)}
+                            ${createRoofVisualizationSVG(measurements, visualizationConfig)}
                         </div>
+                        <div id="visualization-controls" class="hidden"></div>
                         <table class="measurements-table">
                             <tbody>
                                 ${measurementRows.map(row => `
@@ -1063,7 +1172,7 @@ function handleProfileSave(e: Event) {
 
 
 /**
- * Handles the submission of the address form.
+ * Handles the submission of the address form via button click.
  * @param e The form submission event.
  */
 async function handleAddressSubmit(e: Event) {
@@ -1071,27 +1180,9 @@ async function handleAddressSubmit(e: Event) {
     const form = e.target as HTMLFormElement;
     const input = form.querySelector('#address-input') as HTMLInputElement;
     const templateSelect = form.querySelector('#template-select') as HTMLSelectElement;
-    const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
     const address = input.value.trim();
     const templateId = templateSelect.value ? Number(templateSelect.value) : undefined;
-
-    if (!address) {
-        alert('Please enter a valid address.');
-        return;
-    }
-    
-    setButtonLoadingState(button, true, 'Generating...');
-    renderLoadingView();
-
-    try {
-        const { imageUrl, measurements } = await getRoofReport(address);
-        const newReport = saveReportToHistory({ address, imageUrl, measurements, templateId });
-        renderReportView(newReport);
-    } catch (error) {
-        console.error('Failed to get roof report:', error);
-        alert('Sorry, we could not generate a report for that address. Please try again.');
-        renderAddressInput(); // Go back to the input form on error
-    }
+    generateAndDisplayReport(address, templateId);
 }
 
 /**
@@ -1103,6 +1194,7 @@ function handleToggleEditMode(isEditing: boolean, report: Report) {
     const tableCells = document.querySelectorAll('.measurements-table td[data-key]');
     const actionsContainer = document.querySelector('.report-actions');
     const customSectionsContainer = document.querySelector('.custom-sections-container');
+    const vizControlsContainer = document.getElementById('visualization-controls');
     
     if (isEditing && actionsContainer) {
         tableCells.forEach(cell => {
@@ -1120,6 +1212,69 @@ function handleToggleEditMode(isEditing: boolean, report: Report) {
                 const sectionId = div.dataset.sectionId!;
                 const content = report.customData?.[sectionId] || '';
                 div.innerHTML = `<textarea class="custom-section-textarea" data-section-id="${sectionId}" rows="5">${content}</textarea>`;
+            });
+        }
+
+        if (vizControlsContainer) {
+            vizControlsContainer.classList.remove('hidden');
+            const currentConfig = report.visualizationConfig || { 
+                fillColor: '#2D3748', strokeColor: '#4A5568', 
+                textColor: '#E2E8F0', mutedTextColor: '#A0AEC0' 
+            };
+            vizControlsContainer.innerHTML = `
+                <div class="vis-controls-header">
+                    <h4>Customize Diagram</h4>
+                    <button type="button" class="btn-link" id="reset-vis-colors-btn">Reset to Default</button>
+                </div>
+                <div class="vis-controls-grid">
+                    <div class="vis-control">
+                        <label for="fill-color-picker">Fill</label>
+                        <input type="color" id="fill-color-picker" value="${currentConfig.fillColor}">
+                    </div>
+                    <div class="vis-control">
+                        <label for="stroke-color-picker">Lines</label>
+                        <input type="color" id="stroke-color-picker" value="${currentConfig.strokeColor}">
+                    </div>
+                    <div class="vis-control">
+                        <label for="text-color-picker">Text</label>
+                        <input type="color" id="text-color-picker" value="${currentConfig.textColor}">
+                    </div>
+                    <div class="vis-control">
+                        <label for="muted-text-color-picker">Muted Text</label>
+                        <input type="color" id="muted-text-color-picker" value="${currentConfig.mutedTextColor}">
+                    </div>
+                </div>
+            `;
+    
+            const updateVisualization = () => {
+                const newConfig: VisualizationConfig = {
+                    fillColor: (document.getElementById('fill-color-picker') as HTMLInputElement).value,
+                    strokeColor: (document.getElementById('stroke-color-picker') as HTMLInputElement).value,
+                    textColor: (document.getElementById('text-color-picker') as HTMLInputElement).value,
+                    mutedTextColor: (document.getElementById('muted-text-color-picker') as HTMLInputElement).value,
+                };
+                const svgContainer = document.querySelector('.roof-visualization-container');
+                if (svgContainer) {
+                    svgContainer.innerHTML = createRoofVisualizationSVG(report.measurements, newConfig);
+                }
+            };
+    
+            vizControlsContainer.querySelectorAll('input[type="color"]').forEach(input => {
+                input.addEventListener('input', updateVisualization);
+            });
+
+            document.getElementById('reset-vis-colors-btn')?.addEventListener('click', () => {
+                const defaultColors = {
+                    fillColor: '#2D3748',
+                    strokeColor: '#4A5568',
+                    textColor: '#E2E8F0',
+                    mutedTextColor: '#A0AEC0'
+                };
+                (document.getElementById('fill-color-picker') as HTMLInputElement).value = defaultColors.fillColor;
+                (document.getElementById('stroke-color-picker') as HTMLInputElement).value = defaultColors.strokeColor;
+                (document.getElementById('text-color-picker') as HTMLInputElement).value = defaultColors.textColor;
+                (document.getElementById('muted-text-color-picker') as HTMLInputElement).value = defaultColors.mutedTextColor;
+                updateVisualization();
             });
         }
 
@@ -1160,13 +1315,21 @@ function handleSaveChanges(originalReport: Report) {
         newCustomData[sectionId] = textarea.value;
     });
 
+    const newVisualizationConfig: VisualizationConfig = {
+        fillColor: (document.getElementById('fill-color-picker') as HTMLInputElement).value,
+        strokeColor: (document.getElementById('stroke-color-picker') as HTMLInputElement).value,
+        textColor: (document.getElementById('text-color-picker') as HTMLInputElement).value,
+        mutedTextColor: (document.getElementById('muted-text-color-picker') as HTMLInputElement).value,
+    };
+
     const updatedReport: Report = {
         ...originalReport,
         measurements: {
             ...originalReport.measurements,
             ...newMeasurements
         },
-        customData: newCustomData
+        customData: newCustomData,
+        visualizationConfig: newVisualizationConfig
     };
 
     setTimeout(() => {
@@ -1265,7 +1428,21 @@ async function handleDownloadPdf(report: Report) {
             doc.text('Roof Diagram', MARGIN, cursorY);
             cursorY += 15;
 
-            const canvas = await html2canvas(visualizationEl, { scale: 2 });
+            // Temporarily replace SVG text colors for PDF generation if they are dark
+            const vizConfig = report.visualizationConfig;
+            const pdfVizConfig: VisualizationConfig = {
+                fillColor: vizConfig?.fillColor || '#FFFFFF',
+                strokeColor: vizConfig?.strokeColor || '#444444',
+                textColor: '#000000',
+                mutedTextColor: '#555555'
+            };
+            visualizationEl.innerHTML = createRoofVisualizationSVG(measurements, pdfVizConfig);
+
+            const canvas = await html2canvas(visualizationEl, { scale: 2, backgroundColor: '#ffffff' }); // Force white background
+            
+            // Restore original SVG
+            visualizationEl.innerHTML = createRoofVisualizationSVG(measurements, vizConfig);
+
             const vizImgData = canvas.toDataURL('image/png');
             const vizAspectRatio = canvas.height / canvas.width;
             const vizImgWidth = CONTENT_WIDTH;
@@ -1273,6 +1450,7 @@ async function handleDownloadPdf(report: Report) {
             doc.addImage(vizImgData, 'PNG', MARGIN, cursorY, vizImgWidth, vizImgHeight);
             cursorY += vizImgHeight + 30;
         }
+
 
         cursorY = checkPageBreak(cursorY, 150);
 
@@ -1350,6 +1528,13 @@ function openModal() {
  */
 function closeModal() {
     modalOverlay.classList.add('hidden');
+    // Clear any validation errors when closing
+    const emailInput = document.getElementById('email') as HTMLInputElement | null;
+    const emailError = document.getElementById('email-error') as HTMLDivElement | null;
+    if (emailInput && emailError) {
+        emailInput.classList.remove('invalid');
+        emailError.textContent = '';
+    }
 }
 
 /**
@@ -1358,12 +1543,38 @@ function closeModal() {
  */
 function handleSignUpFormSubmit(e: Event) {
     e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const emailInput = form.querySelector('#email') as HTMLInputElement;
+    const emailError = document.getElementById('email-error') as HTMLDivElement;
+    const email = emailInput.value.trim();
+
+    // Clear previous errors
+    emailInput.classList.remove('invalid');
+    emailError.textContent = '';
+
+    // Simple regex for email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    if (email === '') {
+        emailInput.classList.add('invalid');
+        emailError.textContent = 'Email address is required.';
+        emailInput.focus();
+        return;
+    }
+
+    if (!emailRegex.test(email)) {
+        emailInput.classList.add('invalid');
+        emailError.textContent = 'Please enter a valid email address.';
+        emailInput.focus();
+        return;
+    }
+
     closeModal();
     renderAddressInput();
 
     // Update nav to reflect "logged-in" state
-    signUpNav
-Btn.textContent = 'New Report';
+    signInNavBtn.classList.add('hidden');
+    signUpNavBtn.textContent = 'New Report';
     signUpNavBtn.removeEventListener('click', openModal);
     signUpNavBtn.addEventListener('click', renderAddressInput);
 
@@ -1398,6 +1609,7 @@ function init() {
     });
 
     // Modal and signup flow
+    signInNavBtn.addEventListener('click', openModal);
     signUpNavBtn.addEventListener('click', openModal);
     closeModalBtn.addEventListener('click', closeModal);
     modalOverlay.addEventListener('click', (e) => {
@@ -1406,6 +1618,19 @@ function init() {
         }
     });
     signUpForm.addEventListener('submit', handleSignUpFormSubmit);
+
+    // Dynamically load the Google Maps API script
+    const loadGoogleMapsAPI = () => {
+        if (document.querySelector('script[src*="maps.googleapis.com"]')) {
+            return; // Script already added
+        }
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.API_KEY}&libraries=places&loading=async`;
+        script.async = true;
+        document.head.appendChild(script);
+    };
+
+    loadGoogleMapsAPI();
     
     // Initial render
     renderLandingPage();
