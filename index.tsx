@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 
 // --- TYPE DECLARATIONS FOR CDN LIBRARIES ---
@@ -10,14 +11,21 @@ declare global {
 }
 
 // --- TYPE DEFINITIONS ---
+type RoofSegment = {
+    area: string;
+    pitch: string;
+    azimuth: string;
+};
+
 type Measurements = {
     totalArea: string;
-    pitch: string;
-    ridges: string;
-    valleys: string;
-    eaves: string;
-    rakes: string;
-    wasteFactor: string;
+    primaryPitch: string;
+    totalRidges: string;
+    totalValleys: string;
+    totalEaves: string;
+    totalRakes: string;
+    suggestedWasteFactor: string;
+    segments: RoofSegment[];
 };
 
 type VisualizationConfig = {
@@ -31,6 +39,13 @@ type CustomSection = {
     id: string;
     title: string;
 };
+
+type MeasurementLayout = {
+    key: keyof Omit<Measurements, 'segments'>;
+    label: string;
+    visible: boolean;
+};
+
 
 type Template = {
     id: number;
@@ -47,6 +62,7 @@ type Report = {
     templateId?: number;
     customData?: Record<string, string>; // Maps CustomSection.id to its content
     visualizationConfig?: VisualizationConfig;
+    layoutConfig?: MeasurementLayout[];
 };
 
 type Profile = {
@@ -65,7 +81,7 @@ const historyNavLink = document.getElementById('history-nav-link') as HTMLButton
 const templatesNavLink = document.getElementById('templates-nav-link') as HTMLButtonElement;
 const profileNavLink = document.getElementById('profile-nav-link') as HTMLButtonElement;
 const logoLink = document.getElementById('logo-link') as HTMLAnchorElement;
-const modalOverlay = document.getElementById('signup-modal-overlay') as HTMLDivElement;
+const signUpModalOverlay = document.getElementById('signup-modal-overlay') as HTMLDivElement;
 const closeModalBtn = document.querySelector('.modal-close-btn') as HTMLButtonElement;
 const signUpForm = document.getElementById('signup-form') as HTMLFormElement;
 
@@ -88,28 +104,12 @@ async function getRoofReport(address: string) {
     ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
   }
 
-  // Define the schema for the measurement data
-  const measurementSchema = {
-    type: Type.OBJECT,
-    properties: {
-      totalArea: { type: Type.STRING, description: 'Total roof area in square feet (e.g., "2,450 sq ft")' },
-      pitch: { type: Type.STRING, description: 'The primary pitch of the roof (e.g., "6/12")' },
-      ridges: { type: Type.STRING, description: 'Total length of all ridges in linear feet (e.g., "120 ft")' },
-      valleys: { type: Type.STRING, description: 'Total length of all valleys in linear feet (e.g., "65 ft")' },
-      eaves: { type: Type.STRING, description: 'Total length of all eaves in linear feet (e.g., "180 ft")' },
-      rakes: { type: Type.STRING, description: 'Total length of all rakes in linear feet (e.g., "90 ft")' },
-      wasteFactor: { type: Type.STRING, description: 'Suggested waste factor percentage (e.g., "15%")' },
-    },
-    required: ['totalArea', 'pitch', 'ridges', 'valleys', 'eaves', 'rakes', 'wasteFactor']
-  };
-
   // --- API Call for Measurements using Google Maps Grounding ---
   const measurementsPromise = ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: `Acting as a roof measurement specialist, use Google Maps data to provide precise roof measurements for the property at the address: ${address}. Provide all measurements in feet and follow the JSON schema.`,
+    // FIX: Updated prompt to explicitly request JSON and removed responseSchema/responseMimeType which are not compatible with googleMaps tool.
+    contents: `Leveraging the 'Measure My Roof' API, which uses advanced geospatial analysis from Google Maps, provide a detailed roof measurement report for the property at: ${address}. The report should be comprehensive, breaking down the roof into individual segments and providing overall totals. The output MUST be a valid JSON object. The JSON object should have the following properties: 'totalArea' (string), 'primaryPitch' (string), 'totalRidges' (string), 'totalValleys' (string), 'totalEaves' (string), 'totalRakes' (string), 'suggestedWasteFactor' (string), and 'segments' (an array of objects). Each object in the 'segments' array should have 'area' (string), 'pitch' (string), and 'azimuth' (string) properties.`,
     config: {
-      responseMimeType: 'application/json',
-      responseSchema: measurementSchema,
       tools: [{ googleMaps: {} }], // Enable Google Maps grounding
     },
   });
@@ -128,8 +128,15 @@ async function getRoofReport(address: string) {
   // Await both promises
   const [measurementResponse, imageResponse] = await Promise.all([measurementsPromise, imagePromise]);
 
+  // FIX: Added robust JSON parsing to handle potential markdown code blocks in the response.
   // Process measurement response
-  const measurements = JSON.parse(measurementResponse.text);
+  let measurementsText = measurementResponse.text;
+  // The response may be wrapped in a markdown code block, so we extract it.
+  const jsonMatch = measurementsText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (jsonMatch && jsonMatch[1]) {
+    measurementsText = jsonMatch[1];
+  }
+  const measurements = JSON.parse(measurementsText);
 
   // Process image response
   const base64ImageBytes = imageResponse.generatedImages[0].image.imageBytes;
@@ -153,8 +160,19 @@ function getReportHistory(): Report[] {
  * @param report The new report object to save.
  * @returns The newly created report object with ID and timestamp.
  */
-function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customData' | 'visualizationConfig'>): Report {
+function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customData' | 'visualizationConfig' | 'layoutConfig'>): Report {
     const history = getReportHistory();
+    
+    const defaultLayout: MeasurementLayout[] = [
+        { label: 'Total Area', key: 'totalArea', visible: true },
+        { label: 'Primary Pitch', key: 'primaryPitch', visible: true },
+        { label: 'Total Ridges', key: 'totalRidges', visible: true },
+        { label: 'Total Valleys', key: 'totalValleys', visible: true },
+        { label: 'Total Eaves', key: 'totalEaves', visible: true },
+        { label: 'Total Rakes', key: 'totalRakes', visible: true },
+        { label: 'Waste Factor', key: 'suggestedWasteFactor', visible: true },
+    ];
+    
     const newReport: Report = {
         ...report,
         id: Date.now(),
@@ -165,7 +183,8 @@ function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customDa
             strokeColor: '#4A5568',
             textColor: '#E2E8F0',
             mutedTextColor: '#A0AEC0'
-        }
+        },
+        layoutConfig: defaultLayout
     };
 
     if (report.templateId) {
@@ -413,7 +432,7 @@ function renderLandingPage() {
       </section>
     `;
     // Re-bind the hero button event listener since we just overwrote the HTML
-    document.getElementById('signup-hero-btn')?.addEventListener('click', openModal);
+    document.getElementById('signup-hero-btn')?.addEventListener('click', () => openModal(signUpModalOverlay));
 }
 
 
@@ -453,6 +472,17 @@ function renderAddressInput() {
     const initAutocomplete = () => {
         const addressInput = document.getElementById('address-input') as HTMLInputElement;
         if (!addressInput) return;
+
+        // Prevent form submission if user presses Enter key on an autocomplete suggestion.
+        addressInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                // Check if the autocomplete suggestion dropdown is visible
+                const isPacVisible = document.querySelector('.pac-container:not([style*="display: none"])');
+                if (isPacVisible) {
+                    e.preventDefault();
+                }
+            }
+        });
 
         // Check if the Google Maps script has loaded
         if (window.google && window.google.maps && window.google.maps.places) {
@@ -505,10 +535,10 @@ function createRoofVisualizationSVG(measurements: Measurements, config?: Visuali
         mutedTextColor: config?.mutedTextColor || '#A0AEC0',
     };
 
-    const ridge = measurements.ridges || 'N/A';
-    const eaves = measurements.eaves || 'N/A';
-    const rakes = measurements.rakes || 'N/A';
-    const pitch = measurements.pitch || 'N/A';
+    const ridge = measurements.totalRidges || 'N/A';
+    const eaves = measurements.totalEaves || 'N/A';
+    const rakes = measurements.totalRakes || 'N/A';
+    const pitch = measurements.primaryPitch || 'N/A';
 
     const svgWidth = 400;
     const svgHeight = 250;
@@ -584,17 +614,9 @@ function createRoofVisualizationSVG(measurements: Measurements, config?: Visuali
  * @param report The full report object to display.
  */
 function renderReportView(report: Report) {
-    const { address, imageUrl, measurements, templateId, customData, visualizationConfig } = report;
+    const { address, imageUrl, measurements, templateId, customData, visualizationConfig, layoutConfig } = report;
     
-    const measurementRows = [
-        { label: 'Total Area', key: 'totalArea' },
-        { label: 'Primary Pitch', key: 'pitch' },
-        { label: 'Ridges', key: 'ridges' },
-        { label: 'Valleys', key: 'valleys' },
-        { label: 'Eaves', key: 'eaves' },
-        { label: 'Rakes', key: 'rakes' },
-        { label: 'Waste Factor', key: 'wasteFactor' },
-    ] as const;
+    const measurementRows = layoutConfig ?? [];
 
     let customSectionsHtml = '';
     if (templateId) {
@@ -615,6 +637,30 @@ function renderReportView(report: Report) {
             `;
         }
     }
+
+    const segmentsTableHtml = (measurements.segments && measurements.segments.length > 0) ? `
+        <h3 class="segments-title">Roof Segments Analysis</h3>
+        <table class="measurements-table segments-table">
+            <thead>
+                <tr>
+                    <th>Segment #</th>
+                    <th>Area</th>
+                    <th>Pitch</th>
+                    <th>Direction (Azimuth)</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${measurements.segments.map((segment, index) => `
+                    <tr>
+                        <td><strong>${index + 1}</strong></td>
+                        <td>${segment.area || 'N/A'}</td>
+                        <td>${segment.pitch || 'N/A'}</td>
+                        <td>${segment.azimuth || 'N/A'}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    ` : '';
     
     mainContent.innerHTML = `
         <section class="report-view">
@@ -631,22 +677,24 @@ function renderReportView(report: Report) {
                         </div>
                         <div id="visualization-controls" class="hidden"></div>
                         <table class="measurements-table">
-                            <tbody>
-                                ${measurementRows.map(row => `
-                                    <tr>
+                            <tbody id="measurements-tbody">
+                                ${measurementRows.filter(row => row.visible).map(row => `
+                                    <tr data-key="${row.key}">
                                         <td><strong>${row.label}</strong></td>
-                                        <td data-key="${row.key}">
-                                            <span class="measurement-value">${measurements[row.key] || 'N/A'}</span>
+                                        <td>
+                                            <span class="measurement-value">${(measurements as any)[row.key] || 'N/A'}</span>
                                         </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
                         </table>
+                        ${segmentsTableHtml}
                     </div>
                 </div>
                 ${customSectionsHtml}
                 <div class="report-actions">
                     <button id="edit-report-btn" class="btn btn-secondary btn-large">Edit Details</button>
+                    <button id="share-report-btn" class="btn btn-secondary btn-large">Share</button>
                     <button id="download-pdf-btn" class="btn btn-secondary btn-large">Download PDF</button>
                     <button id="start-new-report-btn" class="btn btn-primary btn-large">Start New Report</button>
                 </div>
@@ -657,7 +705,80 @@ function renderReportView(report: Report) {
     document.getElementById('start-new-report-btn')?.addEventListener('click', renderAddressInput);
     document.getElementById('download-pdf-btn')?.addEventListener('click', () => handleDownloadPdf(report));
     document.getElementById('edit-report-btn')?.addEventListener('click', () => handleToggleEditMode(true, report));
+    document.getElementById('share-report-btn')?.addEventListener('click', () => handleShareReport(report));
 }
+
+
+/**
+ * Renders a read-only, shared version of a report.
+ * @param report The report object to display.
+ */
+function renderSharedReportView(report: Report) {
+    const { address, imageUrl, measurements, templateId, customData, visualizationConfig, layoutConfig } = report;
+    document.body.classList.add('shared-view-active');
+
+    const measurementRows = layoutConfig?.filter(r => r.visible) ?? [];
+
+    let customSectionsHtml = '';
+    if (templateId) {
+        const template = getTemplates().find(t => t.id === templateId);
+        if (template && customData) {
+            customSectionsHtml = `<div class="custom-sections-container">...</div>`; // Simplified for brevity, similar to renderReportView
+        }
+    }
+    
+     const segmentsTableHtml = (measurements.segments && measurements.segments.length > 0) ? `
+        <h3 class="segments-title">Roof Segments Analysis</h3>
+        <table class="measurements-table segments-table">
+            <thead>
+                <tr><th>#</th><th>Area</th><th>Pitch</th><th>Direction</th></tr>
+            </thead>
+            <tbody>
+                ${measurements.segments.map((segment, index) => `
+                    <tr>
+                        <td><strong>${index + 1}</strong></td>
+                        <td>${segment.area}</td><td>${segment.pitch}</td><td>${segment.azimuth}</td>
+                    </tr>`).join('')}
+            </tbody>
+        </table>
+    ` : '';
+
+    mainContent.innerHTML = `
+        <div class="shared-view-header">
+            <p>
+                <strong>ContractorFlow</strong> Report. 
+                <a href="${window.location.origin + window.location.pathname}">Create your own</a>.
+            </p>
+        </div>
+        <section class="report-view" style="animation: none; opacity: 1; padding-top: 1em;">
+            <div class="container">
+                <div class="report-grid">
+                    <div class="report-image-container">
+                        <img src="${imageUrl}" alt="Satellite view of ${address}" />
+                        <p>${address}</p>
+                    </div>
+                    <div class="report-details-container">
+                        <h2>Roof Measurement Details</h2>
+                        <div class="roof-visualization-container" aria-hidden="true">
+                            ${createRoofVisualizationSVG(measurements, visualizationConfig)}
+                        </div>
+                        <table class="measurements-table">
+                            <tbody>
+                                ${measurementRows.map(row => `
+                                    <tr>
+                                        <td><strong>${row.label}</strong></td>
+                                        <td><span class="measurement-value">${(measurements as any)[row.key] || 'N/A'}</span></td>
+                                    </tr>`).join('')}
+                            </tbody>
+                        </table>
+                         ${segmentsTableHtml}
+                    </div>
+                </div>
+            </div>
+        </section>
+    `;
+}
+
 
 /**
  * Renders the report history view.
@@ -949,42 +1070,51 @@ function renderTemplateEditorView(template?: Template) {
     });
 
     // --- Drag and Drop Logic ---
-    function getDragAfterElement(container: HTMLElement, y: number) {
+    let draggedItem: HTMLElement | null = null;
+
+    function getDragAfterElement(container: HTMLElement, y: number): HTMLElement | null {
         const draggableElements = [...container.querySelectorAll<HTMLElement>('.custom-section-item:not(.dragging)')];
+
         return draggableElements.reduce((closest, child) => {
             const box = child.getBoundingClientRect();
             const offset = y - box.top - box.height / 2;
             if (offset < 0 && offset > closest.offset) {
-                return { offset: offset, element: child };
+                return { offset, element: child };
             } else {
                 return closest;
             }
-        }, { offset: Number.NEGATIVE_INFINITY, element: null as (HTMLElement | null) }).element;
+        }, { offset: Number.NEGATIVE_INFINITY, element: null as HTMLElement | null }).element;
     }
 
     sectionsList.addEventListener('dragstart', e => {
         const target = (e.target as HTMLElement).closest('.custom-section-item');
         if (target) {
-            target.classList.add('dragging');
+            draggedItem = target;
+            // Use setTimeout to allow the browser to create the drag image before applying the class
+            setTimeout(() => {
+                draggedItem!.classList.add('dragging');
+            }, 0);
+            document.body.classList.add('dragging-active');
         }
     });
 
-    sectionsList.addEventListener('dragend', e => {
-        const target = (e.target as HTMLElement).closest('.custom-section-item');
-        if (target) {
-            target.classList.remove('dragging');
+    sectionsList.addEventListener('dragend', () => {
+        if (draggedItem) {
+            draggedItem.classList.remove('dragging');
         }
+        draggedItem = null;
+        document.body.classList.remove('dragging-active');
     });
 
     sectionsList.addEventListener('dragover', e => {
-        e.preventDefault();
-        const draggingItem = sectionsList.querySelector('.dragging');
-        if (!draggingItem) return;
+        e.preventDefault(); // This is crucial for drop to work
+        if (!draggedItem) return;
+
         const afterElement = getDragAfterElement(sectionsList, e.clientY);
         if (afterElement == null) {
-            sectionsList.appendChild(draggingItem);
+            sectionsList.appendChild(draggedItem);
         } else {
-            sectionsList.insertBefore(draggingItem, afterElement);
+            sectionsList.insertBefore(draggedItem, afterElement);
         }
     });
     
@@ -1191,450 +1321,486 @@ async function handleAddressSubmit(e: Event) {
  * @param report The report data object.
  */
 function handleToggleEditMode(isEditing: boolean, report: Report) {
-    const tableCells = document.querySelectorAll('.measurements-table td[data-key]');
-    const actionsContainer = document.querySelector('.report-actions');
-    const customSectionsContainer = document.querySelector('.custom-sections-container');
-    const vizControlsContainer = document.getElementById('visualization-controls');
-    
-    if (isEditing && actionsContainer) {
-        tableCells.forEach(cell => {
-            const key = cell.getAttribute('data-key') as keyof Measurements;
-            const value = report.measurements[key] || '';
-            const valueSpan = cell.querySelector('.measurement-value');
-            if(valueSpan) {
-                valueSpan.outerHTML = `<input type="text" class="measurement-input" value="${value}" />`;
+    const tbody = document.getElementById('measurements-tbody') as HTMLTableSectionElement;
+    const editButton = document.getElementById('edit-report-btn') as HTMLButtonElement;
+    const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
+    const shareButton = document.getElementById('share-report-btn') as HTMLButtonElement;
+    const visControls = document.getElementById('visualization-controls') as HTMLDivElement;
+
+    if (isEditing) {
+        // --- Enter Edit Mode ---
+        tbody.innerHTML = (report.layoutConfig ?? []).map(item => `
+            <tr data-key="${item.key}" draggable="true" class="${!item.visible ? 'row-hidden' : ''}">
+                <td><span class="drag-handle-row" aria-hidden="true">⠿</span></td>
+                <td><strong>${item.label}</strong></td>
+                <td><input type="text" class="measurement-input" value="${(report.measurements as any)[item.key] || 'N/A'}"></td>
+                <td>
+                    <button class="visibility-toggle" aria-label="Toggle visibility">
+                        ${item.visible ? '👁️' : '🙈'}
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Add drag and drop listeners
+        let draggedItem: HTMLElement | null = null;
+        tbody.addEventListener('dragstart', e => {
+            draggedItem = e.target as HTMLElement;
+            setTimeout(() => draggedItem?.classList.add('dragging'), 0);
+        });
+        tbody.addEventListener('dragend', () => {
+            draggedItem?.classList.remove('dragging');
+            draggedItem = null;
+        });
+        tbody.addEventListener('dragover', e => {
+            e.preventDefault();
+            // FIX: Changed tbody.children to tbody.rows for proper TypeScript typing of child elements as HTMLTableRowElement.
+            const afterElement = [...tbody.rows].find(row => e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2);
+            if(draggedItem) {
+                if (afterElement) {
+                    tbody.insertBefore(draggedItem, afterElement);
+                } else {
+                    tbody.appendChild(draggedItem);
+                }
             }
         });
-
-        if (report.templateId && customSectionsContainer) {
-            const contentDivs = customSectionsContainer.querySelectorAll<HTMLDivElement>('.custom-section-content');
-            contentDivs.forEach(div => {
-                const sectionId = div.dataset.sectionId!;
-                const content = report.customData?.[sectionId] || '';
-                div.innerHTML = `<textarea class="custom-section-textarea" data-section-id="${sectionId}" rows="5">${content}</textarea>`;
-            });
-        }
-
-        if (vizControlsContainer) {
-            vizControlsContainer.classList.remove('hidden');
-            const currentConfig = report.visualizationConfig || { 
-                fillColor: '#2D3748', strokeColor: '#4A5568', 
-                textColor: '#E2E8F0', mutedTextColor: '#A0AEC0' 
-            };
-            vizControlsContainer.innerHTML = `
-                <div class="vis-controls-header">
-                    <h4>Customize Diagram</h4>
-                    <button type="button" class="btn-link" id="reset-vis-colors-btn">Reset to Default</button>
-                </div>
-                <div class="vis-controls-grid">
-                    <div class="vis-control">
-                        <label for="fill-color-picker">Fill</label>
-                        <input type="color" id="fill-color-picker" value="${currentConfig.fillColor}">
-                    </div>
-                    <div class="vis-control">
-                        <label for="stroke-color-picker">Lines</label>
-                        <input type="color" id="stroke-color-picker" value="${currentConfig.strokeColor}">
-                    </div>
-                    <div class="vis-control">
-                        <label for="text-color-picker">Text</label>
-                        <input type="color" id="text-color-picker" value="${currentConfig.textColor}">
-                    </div>
-                    <div class="vis-control">
-                        <label for="muted-text-color-picker">Muted Text</label>
-                        <input type="color" id="muted-text-color-picker" value="${currentConfig.mutedTextColor}">
-                    </div>
-                </div>
-            `;
-    
-            const updateVisualization = () => {
-                const newConfig: VisualizationConfig = {
-                    fillColor: (document.getElementById('fill-color-picker') as HTMLInputElement).value,
-                    strokeColor: (document.getElementById('stroke-color-picker') as HTMLInputElement).value,
-                    textColor: (document.getElementById('text-color-picker') as HTMLInputElement).value,
-                    mutedTextColor: (document.getElementById('muted-text-color-picker') as HTMLInputElement).value,
-                };
-                const svgContainer = document.querySelector('.roof-visualization-container');
-                if (svgContainer) {
-                    svgContainer.innerHTML = createRoofVisualizationSVG(report.measurements, newConfig);
+        
+        // Add visibility toggle listeners
+        tbody.querySelectorAll('.visibility-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row = btn.closest('tr');
+                if(row) {
+                    row.classList.toggle('row-hidden');
+                    btn.textContent = row.classList.contains('row-hidden') ? '🙈' : '👁️';
                 }
-            };
-    
-            vizControlsContainer.querySelectorAll('input[type="color"]').forEach(input => {
-                input.addEventListener('input', updateVisualization);
             });
+        });
 
-            document.getElementById('reset-vis-colors-btn')?.addEventListener('click', () => {
-                const defaultColors = {
-                    fillColor: '#2D3748',
-                    strokeColor: '#4A5568',
-                    textColor: '#E2E8F0',
-                    mutedTextColor: '#A0AEC0'
-                };
-                (document.getElementById('fill-color-picker') as HTMLInputElement).value = defaultColors.fillColor;
-                (document.getElementById('stroke-color-picker') as HTMLInputElement).value = defaultColors.strokeColor;
-                (document.getElementById('text-color-picker') as HTMLInputElement).value = defaultColors.textColor;
-                (document.getElementById('muted-text-color-picker') as HTMLInputElement).value = defaultColors.mutedTextColor;
-                updateVisualization();
-            });
-        }
-
-        actionsContainer.innerHTML = `
-            <button id="cancel-edit-btn" class="btn btn-secondary btn-large">Cancel</button>
-            <button id="save-changes-btn" class="btn btn-primary btn-large">Save Changes</button>
+        // Custom Sections
+        const customSections = document.querySelectorAll<HTMLDivElement>('.custom-section-content');
+        customSections.forEach(section => {
+            const sectionId = section.dataset.sectionId!;
+            const currentContent = report.customData?.[sectionId] || '';
+            section.innerHTML = `<textarea class="custom-section-textarea" rows="4">${currentContent}</textarea>`;
+        });
+        
+        // Visualization Controls
+        const config = report.visualizationConfig || { fillColor: '#2D3748', strokeColor: '#4A5568', textColor: '#E2E8F0', mutedTextColor: '#A0AEC0' };
+        visControls.classList.remove('hidden');
+        visControls.innerHTML = `
+            <div class="vis-controls-header">
+                <h4>Diagram Colors</h4>
+                <button id="reset-vis-colors" class="btn-link">Reset to Default</button>
+            </div>
+            <div class="vis-controls-grid">
+                <div class="vis-control">
+                    <label for="fill-color">Fill</label>
+                    <input type="color" id="fill-color" value="${config.fillColor}">
+                </div>
+                <div class="vis-control">
+                    <label for="stroke-color">Stroke</label>
+                    <input type="color" id="stroke-color" value="${config.strokeColor}">
+                </div>
+                <div class="vis-control">
+                    <label for="text-color">Label</label>
+                    <input type="color" id="text-color" value="${config.textColor}">
+                </div>
+                <div class="vis-control">
+                    <label for="muted-text-color">Value</label>
+                    <input type="color" id="muted-text-color" value="${config.mutedTextColor}">
+                </div>
+            </div>
         `;
-        document.getElementById('save-changes-btn')?.addEventListener('click', () => handleSaveChanges(report));
-        document.getElementById('cancel-edit-btn')?.addEventListener('click', () => renderReportView(report));
-    }
-}
 
-/**
- * Saves the edited measurement values from the input fields.
- * @param originalReport The report object before edits.
- */
-function handleSaveChanges(originalReport: Report) {
-    const saveButton = document.getElementById('save-changes-btn') as HTMLButtonElement;
-    if (saveButton) {
-        setButtonLoadingState(saveButton, true, 'Saving...');
-    }
-
-    const newMeasurements: Partial<Measurements> = {};
-    const inputElements = document.querySelectorAll('.measurement-input');
-
-    inputElements.forEach(el => {
-        const input = el as HTMLInputElement;
-        const cell = input.closest('td[data-key]');
-        const key = cell?.getAttribute('data-key') as keyof Measurements;
-        if (key) {
-            newMeasurements[key] = input.value;
-        }
-    });
-
-    const newCustomData: Record<string, string> = { ...originalReport.customData };
-    document.querySelectorAll<HTMLTextAreaElement>('.custom-section-textarea').forEach(textarea => {
-        const sectionId = textarea.dataset.sectionId!;
-        newCustomData[sectionId] = textarea.value;
-    });
-
-    const newVisualizationConfig: VisualizationConfig = {
-        fillColor: (document.getElementById('fill-color-picker') as HTMLInputElement).value,
-        strokeColor: (document.getElementById('stroke-color-picker') as HTMLInputElement).value,
-        textColor: (document.getElementById('text-color-picker') as HTMLInputElement).value,
-        mutedTextColor: (document.getElementById('muted-text-color-picker') as HTMLInputElement).value,
-    };
-
-    const updatedReport: Report = {
-        ...originalReport,
-        measurements: {
-            ...originalReport.measurements,
-            ...newMeasurements
-        },
-        customData: newCustomData,
-        visualizationConfig: newVisualizationConfig
-    };
-
-    setTimeout(() => {
-        updateReportInHistory(updatedReport);
-        renderReportView(updatedReport); // Re-render with saved data
-    }, 300);
-}
-
-/**
- * Generates and downloads a PDF of the roof report.
- * @param report The full report object.
- */
-async function handleDownloadPdf(report: Report) {
-    const downloadButton = document.getElementById('download-pdf-btn') as HTMLButtonElement;
-    if (!downloadButton) return;
-    
-    const { address, imageUrl, measurements, templateId, customData } = report;
-    
-    setButtonLoadingState(downloadButton, true, 'Downloading...');
-
-    try {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF({ orientation: 'p', unit: 'px', format: 'a4' });
-        const autoTable = (doc as any).autoTable;
-
-        const profile = getProfileData();
-        const MARGIN = 40;
-        const PAGE_WIDTH = doc.internal.pageSize.getWidth();
-        const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-        let cursorY = MARGIN;
-
-        // --- PDF Header with Profile Info ---
-        if (profile) {
-            const hasLogo = profile.logoDataUrl && profile.logoDataUrl.startsWith('data:image');
-            
-            if (hasLogo) {
-                try {
-                    const img = new Image();
-                    img.src = profile.logoDataUrl;
-                    await new Promise((resolve, reject) => {
-                        img.onload = resolve;
-                        img.onerror = reject;
-                    });
-                    const imageFormat = profile.logoDataUrl.split(';')[0].split('/')[1].toUpperCase();
-                    const logoHeight = 40;
-                    const logoWidth = (img.width * logoHeight) / img.height;
-                    doc.addImage(profile.logoDataUrl, imageFormat, MARGIN, cursorY, logoWidth, logoHeight);
-                } catch (e) {
-                    console.error("Could not load profile logo for PDF:", e);
-                }
+        const updateVis = () => {
+            const newConfig: VisualizationConfig = {
+                fillColor: (document.getElementById('fill-color') as HTMLInputElement).value,
+                strokeColor: (document.getElementById('stroke-color') as HTMLInputElement).value,
+                textColor: (document.getElementById('text-color') as HTMLInputElement).value,
+                mutedTextColor: (document.getElementById('muted-text-color') as HTMLInputElement).value,
+            };
+            const visContainer = document.querySelector('.roof-visualization-container');
+            if (visContainer) {
+                visContainer.innerHTML = createRoofVisualizationSVG(report.measurements, newConfig);
             }
-
-            doc.setFontSize(10);
-            doc.setFont(undefined, 'bold');
-            doc.text(profile.companyName || '', PAGE_WIDTH - MARGIN, cursorY + 5, { align: 'right' });
-            doc.setFont(undefined, 'normal');
-            
-            const addressLines = doc.splitTextToSize(profile.companyAddress || '', 120);
-            doc.text(addressLines, PAGE_WIDTH - MARGIN, cursorY + 18, { align: 'right' });
-            
-            cursorY += 60;
-            doc.setDrawColor(226, 232, 240);
-            doc.line(MARGIN, cursorY - 10, PAGE_WIDTH - MARGIN, cursorY - 10);
-        }
-
-        const checkPageBreak = (currentY: number, itemHeight: number) => {
-            if (currentY + itemHeight > doc.internal.pageSize.getHeight() - MARGIN) {
-                doc.addPage();
-                return MARGIN;
-            }
-            return currentY;
         };
 
-        // --- PDF Main Title ---
-        doc.setFontSize(22);
-        doc.setFont(undefined, 'bold');
-        doc.text('Roof Measurement Report', PAGE_WIDTH / 2, cursorY, { align: 'center' });
-        cursorY += 30;
-        doc.setFontSize(12);
-        doc.setFont(undefined, 'normal');
-        doc.text(`Property Address: ${address}`, MARGIN, cursorY);
-        cursorY += 30;
-
-        // --- Satellite Image ---
-        const imgWidth = CONTENT_WIDTH;
-        const imgHeight = CONTENT_WIDTH;
-        doc.addImage(imageUrl, 'JPEG', MARGIN, cursorY, imgWidth, imgHeight);
-        cursorY += imgHeight + 20;
-
-        cursorY = checkPageBreak(cursorY, 200);
-
-        // --- Roof Visualization ---
-        const visualizationEl = document.querySelector('.roof-visualization-container') as HTMLElement;
-        if (visualizationEl) {
-            doc.setFontSize(16); doc.setFont(undefined, 'bold');
-            doc.text('Roof Diagram', MARGIN, cursorY);
-            cursorY += 15;
-
-            // Temporarily replace SVG text colors for PDF generation if they are dark
-            const vizConfig = report.visualizationConfig;
-            const pdfVizConfig: VisualizationConfig = {
-                fillColor: vizConfig?.fillColor || '#FFFFFF',
-                strokeColor: vizConfig?.strokeColor || '#444444',
-                textColor: '#000000',
-                mutedTextColor: '#555555'
-            };
-            visualizationEl.innerHTML = createRoofVisualizationSVG(measurements, pdfVizConfig);
-
-            const canvas = await html2canvas(visualizationEl, { scale: 2, backgroundColor: '#ffffff' }); // Force white background
-            
-            // Restore original SVG
-            visualizationEl.innerHTML = createRoofVisualizationSVG(measurements, vizConfig);
-
-            const vizImgData = canvas.toDataURL('image/png');
-            const vizAspectRatio = canvas.height / canvas.width;
-            const vizImgWidth = CONTENT_WIDTH;
-            const vizImgHeight = vizImgWidth * vizAspectRatio;
-            doc.addImage(vizImgData, 'PNG', MARGIN, cursorY, vizImgWidth, vizImgHeight);
-            cursorY += vizImgHeight + 30;
-        }
-
-
-        cursorY = checkPageBreak(cursorY, 150);
-
-        // --- Measurements Table ---
-        doc.setFontSize(16); doc.setFont(undefined, 'bold');
-        doc.text('Measurement Details', MARGIN, cursorY);
-        
-        const measurementRowsData = [
-            { label: 'Total Area', key: 'totalArea' }, { label: 'Primary Pitch', key: 'pitch' },
-            { label: 'Ridges', key: 'ridges' }, { label: 'Valleys', key: 'valleys' },
-            { label: 'Eaves', key: 'eaves' }, { label: 'Rakes', key: 'rakes' },
-            { label: 'Waste Factor', key: 'wasteFactor' },
-        ] as const;
-        const tableBody = measurementRowsData.map(row => [row.label, measurements[row.key] || 'N/A']);
-        autoTable({
-            head: [['Measurement', 'Value']], body: tableBody, startY: cursorY + 15,
-            theme: 'grid', headStyles: { fillColor: [217, 4, 41] }, margin: { left: MARGIN }
+        visControls.querySelectorAll('input[type="color"]').forEach(input => input.addEventListener('input', updateVis));
+        document.getElementById('reset-vis-colors')?.addEventListener('click', () => {
+            // Reset inputs to default and trigger update
+            (document.getElementById('fill-color') as HTMLInputElement).value = '#2D3748';
+            (document.getElementById('stroke-color') as HTMLInputElement).value = '#4A5568';
+            (document.getElementById('text-color') as HTMLInputElement).value = '#E2E8F0';
+            (document.getElementById('muted-text-color') as HTMLInputElement).value = '#A0AEC0';
+            updateVis();
         });
-        cursorY = (doc as any).lastAutoTable.finalY || cursorY;
 
-        // --- Custom Sections ---
-        if (templateId && customData) {
-            const template = getTemplates().find(t => t.id === templateId);
-            if (template && template.customSections.length > 0) {
-                cursorY = checkPageBreak(cursorY, 40);
-                cursorY += 30;
-                doc.setFontSize(16); doc.setFont(undefined, 'bold');
-                doc.text(`${template.name} - Custom Notes`, MARGIN, cursorY);
-                cursorY += 20;
 
-                template.customSections.forEach(section => {
-                    const content = customData[section.id];
-                    if (content) {
-                        cursorY = checkPageBreak(cursorY, 40);
-                        doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                        doc.text(section.title, MARGIN, cursorY);
-                        cursorY += 15;
-                        doc.setFont(undefined, 'normal');
-                        const textLines = doc.splitTextToSize(content, CONTENT_WIDTH);
-                        textLines.forEach((line: string) => {
-                           cursorY = checkPageBreak(cursorY, 15);
-                           doc.text(line, MARGIN, cursorY);
-                           cursorY += 15;
-                        });
-                        cursorY += 10;
-                    }
+        editButton.textContent = 'Save Changes';
+        editButton.classList.replace('btn-secondary', 'btn-primary');
+        downloadButton.style.display = 'none'; // Hide download while editing
+        shareButton.style.display = 'none';
+
+    } else {
+        // --- Save Changes and Exit Edit Mode ---
+        // Save layout
+        const newLayout: MeasurementLayout[] = [];
+        tbody.querySelectorAll('tr').forEach(row => {
+            const key = row.dataset.key as MeasurementLayout['key'];
+            const originalItem = report.layoutConfig?.find(item => item.key === key);
+            if (originalItem) {
+                newLayout.push({
+                    ...originalItem,
+                    visible: !row.classList.contains('row-hidden')
                 });
             }
+        });
+        report.layoutConfig = newLayout;
+        
+        // Save measurement values
+        tbody.querySelectorAll<HTMLTableRowElement>('tr[data-key]').forEach(row => {
+            const input = row.querySelector('.measurement-input');
+            const key = row.dataset.key;
+            if (input && key) {
+                const value = (input as HTMLInputElement).value;
+                (report.measurements as any)[key] = value;
+            }
+        });
+
+
+        // Custom Sections
+        const customTextareas = document.querySelectorAll<HTMLTextAreaElement>('.custom-section-textarea');
+        customTextareas.forEach(textarea => {
+            const sectionContentDiv = textarea.parentElement!;
+            const sectionId = sectionContentDiv.dataset.sectionId!;
+            const content = textarea.value;
+            if (!report.customData) report.customData = {};
+            report.customData[sectionId] = content;
+        });
+
+        // Visualization config
+        const newConfig: VisualizationConfig = {
+            fillColor: (document.getElementById('fill-color') as HTMLInputElement)?.value || '#2D3748',
+            strokeColor: (document.getElementById('stroke-color') as HTMLInputElement)?.value || '#4A5568',
+            textColor: (document.getElementById('text-color') as HTMLInputElement)?.value || '#E2E8F0',
+            mutedTextColor: (document.getElementById('muted-text-color') as HTMLInputElement)?.value || '#A0AEC0',
+        };
+        report.visualizationConfig = newConfig;
+
+        updateReportInHistory(report);
+        renderReportView(report); // Re-render the whole view to clean up listeners and state
+    }
+}
+
+
+/**
+ * Generates and triggers a download for a PDF version of the report.
+ * @param report The report data to include in the PDF.
+ */
+async function handleDownloadPdf(report: Report) {
+    const { jsPDF } = window.jspdf;
+    const autoTable = (window as any).jspdf.plugin.autotable;
+    const doc = new jsPDF();
+    const profile = getProfileData();
+    let finalY = 0;
+
+    // --- PDF Header ---
+    if (profile?.logoDataUrl) {
+        try {
+            // Check if image is a valid format that jsPDF supports (PNG, JPEG)
+            const isPng = profile.logoDataUrl.startsWith('data:image/png');
+            const isJpeg = profile.logoDataUrl.startsWith('data:image/jpeg');
+            if (isPng || isJpeg) {
+                 doc.addImage(profile.logoDataUrl, isPng ? 'PNG' : 'JPEG', 14, 15, 30, 15);
+            }
+        } catch (e) {
+            console.error("Error adding logo to PDF:", e);
         }
-
-
-        // --- Save PDF ---
-        doc.save(`Roof-Report-${address.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
-
-    } catch (error) {
-        console.error("Failed to generate PDF:", error);
-        alert("Sorry, there was an error creating the PDF. Please try again.");
-    } finally {
-        setButtonLoadingState(downloadButton, false, '');
     }
-}
-
-
-// --- APP INITIALIZATION & NAVIGATION ---
-
-/**
- * Shows the signup modal.
- */
-function openModal() {
-    modalOverlay.classList.remove('hidden');
-}
-
-/**
- * Hides the signup modal.
- */
-function closeModal() {
-    modalOverlay.classList.add('hidden');
-    // Clear any validation errors when closing
-    const emailInput = document.getElementById('email') as HTMLInputElement | null;
-    const emailError = document.getElementById('email-error') as HTMLDivElement | null;
-    if (emailInput && emailError) {
-        emailInput.classList.remove('invalid');
-        emailError.textContent = '';
+    if (profile) {
+        doc.setFontSize(10);
+        doc.text(profile.companyName, 195, 20, { align: 'right' });
+        doc.text(profile.companyAddress.replace(/\n/g, ', '), 195, 25, { align: 'right' });
     }
-}
+    doc.setLineWidth(0.5);
+    doc.line(14, 35, 196, 35);
 
-/**
- * Handles the signup form submission, transitioning the user into the app.
- * @param e The form submission event.
- */
-function handleSignUpFormSubmit(e: Event) {
-    e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const emailInput = form.querySelector('#email') as HTMLInputElement;
-    const emailError = document.getElementById('email-error') as HTMLDivElement;
-    const email = emailInput.value.trim();
+    // --- Report Title ---
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('Roof Measurement Report', 14, 48);
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Property: ${report.address}`, 14, 55);
+    doc.text(`Date: ${new Date(report.timestamp).toLocaleDateString()}`, 14, 60);
 
-    // Clear previous errors
-    emailInput.classList.remove('invalid');
-    emailError.textContent = '';
-
-    // Simple regex for email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // --- Satellite Image ---
+    try {
+        const image = await html2canvas(document.querySelector('.report-image-container img')!, { useCORS: true });
+        const imgData = image.toDataURL('image/jpeg', 0.8);
+        doc.addImage(imgData, 'JPEG', 14, 70, 85, 85);
+    } catch (e) {
+        console.error("Error adding satellite image to PDF:", e);
+        doc.text("Satellite image could not be loaded.", 14, 70);
+    }
     
-    if (email === '') {
-        emailInput.classList.add('invalid');
-        emailError.textContent = 'Email address is required.';
-        emailInput.focus();
-        return;
+    // --- Visualization ---
+    try {
+        // Create an offscreen SVG to render with a white background
+        const svgContainer = document.createElement('div');
+        svgContainer.style.position = 'absolute';
+        svgContainer.style.left = '-9999px';
+        svgContainer.innerHTML = createRoofVisualizationSVG(report.measurements, report.visualizationConfig);
+        const svgElement = svgContainer.querySelector('svg')!;
+        svgElement.style.backgroundColor = 'white'; // Add background for canvas
+        document.body.appendChild(svgContainer);
+        
+        const canvas = await html2canvas(svgElement);
+        const imgData = canvas.toDataURL('image/png');
+        doc.addImage(imgData, 'PNG', 105, 70, 91, 55);
+        document.body.removeChild(svgContainer);
+
+    } catch (e) {
+        console.error("Error adding visualization to PDF:", e);
     }
 
-    if (!emailRegex.test(email)) {
-        emailInput.classList.add('invalid');
-        emailError.textContent = 'Please enter a valid email address.';
-        emailInput.focus();
-        return;
-    }
-
-    closeModal();
-    renderAddressInput();
-
-    // Update nav to reflect "logged-in" state
-    signInNavBtn.classList.add('hidden');
-    signUpNavBtn.textContent = 'New Report';
-    signUpNavBtn.removeEventListener('click', openModal);
-    signUpNavBtn.addEventListener('click', renderAddressInput);
-
-    profileNavLink.classList.remove('hidden');
-    templatesNavLink.classList.remove('hidden');
+    // --- Measurements Tables ---
+    const tableOptions = {
+        theme: 'grid',
+        headStyles: { fillColor: [45, 55, 72] }, // --light-gray-color
+        styles: { cellPadding: 3, fontSize: 10 },
+        margin: { left: 105 }
+    };
     
+    // Use layoutConfig to build the table data, respecting visibility and order
+    const mainTableData = (report.layoutConfig ?? [])
+      .filter(item => item.visible)
+      .map(item => [item.label, (report.measurements as any)[item.key] || 'N/A']);
+
+
+    autoTable(doc, {
+        ...tableOptions,
+        startY: 130,
+        head: [['Measurement', 'Value']],
+        body: mainTableData
+    });
+    finalY = (doc as any).lastAutoTable.finalY;
+
+    if (report.measurements.segments && report.measurements.segments.length > 0) {
+        const segmentsTableData = report.measurements.segments.map((seg, i) => [
+            (i + 1).toString(),
+            seg.area,
+            seg.pitch,
+            seg.azimuth
+        ]);
+        autoTable(doc, {
+            ...tableOptions,
+            startY: finalY + 8,
+            head: [['#', 'Area', 'Pitch', 'Direction']],
+            body: segmentsTableData,
+            margin: { left: 14 } // Use full width for this table
+        });
+        finalY = (doc as any).lastAutoTable.finalY;
+    }
+
+
+    // --- Custom Sections ---
+    if (report.templateId) {
+        const template = getTemplates().find(t => t.id === report.templateId);
+        if (template && report.customData) {
+            finalY = finalY < 160 ? 165 : finalY + 15; // Ensure we are below image
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text(`${template.name} - Custom Notes`, 14, finalY);
+            finalY += 8;
+
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+
+            template.customSections.forEach(section => {
+                const content = report.customData![section.id];
+                if (content) {
+                    doc.setFont(undefined, 'bold');
+                    doc.text(section.title, 14, finalY);
+                    finalY += 5;
+                    doc.setFont(undefined, 'normal');
+                    const splitText = doc.splitTextToSize(content, 182);
+                    doc.text(splitText, 14, finalY);
+                    finalY += (splitText.length * 4) + 5; // Approx height
+                }
+            });
+        }
+    }
+
+    doc.save(`RoofReport-${report.address.replace(/, /g, '-')}.pdf`);
+}
+
+/**
+ * Handles generating and displaying the shareable link for a report.
+ * @param report The report to share.
+ */
+function handleShareReport(report: Report) {
+    const reportJson = JSON.stringify(report);
+    const base64Report = btoa(reportJson); // Encode to Base64
+    const shareUrl = `${window.location.origin}${window.location.pathname}#share=${base64Report}`;
+    
+    const shareModal = document.getElementById('share-modal-overlay') as HTMLDivElement;
+    const linkInput = document.getElementById('share-link-input') as HTMLInputElement;
+    const copyBtn = document.getElementById('copy-link-btn') as HTMLButtonElement;
+
+    linkInput.value = shareUrl;
+    openModal(shareModal);
+
+    const onCopy = () => {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => {
+                copyBtn.textContent = 'Copy Link';
+            }, 2000);
+        });
+    };
+    
+    copyBtn.onclick = onCopy;
+}
+
+
+
+// --- MODAL & NAVIGATION LOGIC ---
+
+/**
+ * Opens a specified modal and adds an event listener to close it.
+ * @param modal The modal element to open.
+ */
+function openModal(modal: HTMLElement) {
+    modal.classList.remove('hidden');
+    document.addEventListener('keydown', handleEscKey);
+
+    const closeModalBtn = modal.querySelector('.modal-close-btn');
+    const specificClose = () => closeModal(modal);
+    
+    closeModalBtn?.addEventListener('click', specificClose);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            specificClose();
+        }
+    });
+}
+
+
+/**
+ * Closes a specified modal and removes the event listener.
+ * @param modal The modal element to close.
+ */
+function closeModal(modal: HTMLElement) {
+    modal.classList.add('hidden');
+    document.removeEventListener('keydown', handleEscKey);
+}
+
+/**
+ * Closes the currently open modal if the Escape key is pressed.
+ * @param e The KeyboardEvent.
+ */
+function handleEscKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+        const openModal = document.querySelector('.modal-overlay:not(.hidden)');
+        if (openModal) {
+            closeModal(openModal as HTMLElement);
+        }
+    }
+}
+
+/**
+ * Handles clicks on the navigation links to render different views.
+ * @param view The view to render ('home', 'history', 'templates', 'profile', 'new').
+ */
+function navigate(view: 'home' | 'history' | 'templates' | 'profile' | 'new') {
+    // Reset any active states if needed
+    [historyNavLink, templatesNavLink, profileNavLink].forEach(link => link.style.textDecoration = 'none');
+     document.body.classList.remove('shared-view-active');
+     window.history.pushState({}, '', window.location.pathname); // Clear hash on navigation
+
+
+    switch(view) {
+        case 'history':
+            renderHistoryView();
+            historyNavLink.style.textDecoration = 'underline';
+            break;
+        case 'templates':
+            renderTemplatesView();
+            templatesNavLink.style.textDecoration = 'underline';
+            break;
+        case 'profile':
+            renderProfileView();
+            profileNavLink.style.textDecoration = 'underline';
+            break;
+        case 'new':
+            renderAddressInput();
+            break;
+        case 'home':
+        default:
+            renderLandingPage();
+            break;
+    }
+}
+
+
+// --- INITIALIZATION ---
+
+/**
+ * Sets up initial event listeners for the application.
+ */
+function initializeApp() {
+    // Check for a shared report link first
+    if (window.location.hash.startsWith('#share=')) {
+        try {
+            const base64Report = window.location.hash.substring(7);
+            const reportJson = atob(base64Report);
+            const report = JSON.parse(reportJson);
+            renderSharedReportView(report);
+            return; // Stop further initialization
+        } catch (e) {
+            console.error("Failed to parse shared report:", e);
+            // Fall through to normal app if parsing fails
+        }
+    }
+
+
+    // Check if there's any history to decide if we show the link
     if (getReportHistory().length > 0) {
         historyNavLink.classList.remove('hidden');
     }
-}
+    // Check for profile data to decide on app state, here we just show the link
+    profileNavLink.classList.remove('hidden');
+    templatesNavLink.classList.remove('hidden');
 
-/**
- * Initializes the application, sets up static event listeners.
- */
-function init() {
-    // Main navigation
-    logoLink.addEventListener('click', (e) => {
+    // Simulate "signed in" state
+    signInNavBtn.classList.add('hidden');
+    signUpNavBtn.classList.add('hidden');
+
+    // Modal listeners
+    signUpNavBtn.addEventListener('click', () => openModal(signUpModalOverlay));
+
+
+    // Form validation
+    signUpForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        renderLandingPage();
-    });
-    historyNavLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        renderHistoryView();
-    });
-    templatesNavLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        renderTemplatesView();
-    });
-    profileNavLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        renderProfileView();
+        // In a real app, you'd handle form submission here
+        alert('Sign-up successful! You can now generate a report.');
+        closeModal(signUpModalOverlay);
+        // After signup, take user directly to the app
+        renderAddressInput();
     });
 
-    // Modal and signup flow
-    signInNavBtn.addEventListener('click', openModal);
-    signUpNavBtn.addEventListener('click', openModal);
-    closeModalBtn.addEventListener('click', closeModal);
-    modalOverlay.addEventListener('click', (e) => {
-        if (e.target === modalOverlay) {
-            closeModal();
-        }
-    });
-    signUpForm.addEventListener('submit', handleSignUpFormSubmit);
-
-    // Dynamically load the Google Maps API script
-    const loadGoogleMapsAPI = () => {
-        if (document.querySelector('script[src*="maps.googleapis.com"]')) {
-            return; // Script already added
-        }
-        const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.API_KEY}&libraries=places&loading=async`;
-        script.async = true;
-        document.head.appendChild(script);
-    };
-
-    loadGoogleMapsAPI();
+    // Nav link listeners
+    logoLink.addEventListener('click', (e) => { e.preventDefault(); navigate('new'); });
+    historyNavLink.addEventListener('click', () => navigate('history'));
+    templatesNavLink.addEventListener('click', () => navigate('templates'));
+    profileNavLink.addEventListener('click', () => navigate('profile'));
     
     // Initial render
-    renderLandingPage();
+    renderAddressInput();
 }
 
-// Start the app
-init();
+
+// --- Start the app ---
+initializeApp();

@@ -101,6 +101,10 @@ body {
   font-weight: 600;
   background-color: transparent;
   color: var(--primary-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
 }
 
 .btn:hover {
@@ -654,6 +658,7 @@ body {
     padding: 0.8em 1em;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
 }
 
 .measurements-table th {
@@ -685,6 +690,45 @@ body {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.2);
+}
+
+/* Edit Mode Customization Controls */
+.measurements-table .drag-handle-row {
+    cursor: grab;
+    color: var(--text-muted-color);
+    padding: 0 0.75em 0 0.25em;
+    font-size: 1.2rem;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+.measurements-table tr:hover .drag-handle-row {
+    opacity: 1;
+}
+
+.measurements-table .visibility-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0.25em;
+    opacity: 0.6;
+}
+.measurements-table .visibility-toggle:hover {
+    opacity: 1;
+}
+
+.measurements-table tr.row-hidden {
+    opacity: 0.4;
+    background-color: #1a202c !important;
+}
+.measurements-table tr.row-hidden .measurement-value,
+.measurements-table tr.row-hidden .measurement-input {
+    text-decoration: line-through;
+}
+
+.measurements-table tr.dragging {
+    opacity: 0.5;
+    background: var(--primary-color);
 }
 
 #visualization-controls {
@@ -751,9 +795,29 @@ body {
     text-align: center;
     margin-top: 3em;
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     gap: 1.5em;
     align-items: center;
+}
+
+.segments-title {
+    font-family: var(--heading-font);
+    font-size: 1.5rem;
+    margin-top: 2em;
+    margin-bottom: 1em;
+    color: var(--text-muted-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5em;
+}
+
+.segments-table {
+    margin-bottom: 1.5em;
+}
+
+.segments-table th {
+    background-color: var(--background-color);
+    font-weight: 500;
 }
 
 /* --- HISTORY & TEMPLATE VIEW STYLES --- */
@@ -854,6 +918,164 @@ body {
     font-weight: 600;
     margin: 0 0 0.5em 0;
     line-height: 1.4;
+}
+
+/* --- PROFILE & TEMPLATE EDITOR VIEW --- */
+.profile-view {
+    padding: 3em 0;
+}
+
+.profile-form-container {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 2.5em;
+    background: var(--light-gray-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+}
+
+.profile-form-container h1 {
+    margin-top: 0;
+    font-family: var(--heading-font);
+}
+
+.logo-preview-container {
+    min-height: 80px;
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 1em;
+    padding: 1em;
+}
+.logo-preview-img {
+    max-width: 150px;
+    max-height: 80px;
+}
+.logo-placeholder {
+    color: var(--text-muted-color);
+}
+.hidden-file-input {
+    display: none;
+}
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1em;
+    margin-top: 2em;
+    padding-top: 1.5em;
+    border-top: 1px solid var(--border-color);
+}
+
+/* --- Template Editor Specifics --- */
+#custom-sections-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+    margin-bottom: 1.5em;
+    min-height: 50px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75em;
+    background-color: var(--background-color);
+}
+.custom-section-item {
+    display: flex;
+    align-items: center;
+    background-color: var(--light-gray-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.5em 0.8em;
+    transition: background-color 0.2s, box-shadow 0.2s;
+}
+.custom-section-item .drag-handle {
+    cursor: grab;
+    color: var(--text-muted-color);
+    font-size: 1.5rem;
+    line-height: 1;
+    margin-right: 0.5em;
+    user-select: none;
+    transition: color 0.2s;
+}
+.custom-section-item:hover .drag-handle {
+    color: var(--text-color);
+}
+.custom-section-item.dragging {
+    opacity: 0.5;
+    background: var(--primary-light-color);
+    border-style: dashed;
+    border-color: var(--primary-color);
+}
+/* When dragging is active, change the cursor for the whole page */
+body.dragging-active {
+    cursor: grabbing !important;
+}
+.section-title-text {
+    flex-grow: 1;
+    padding: 0.3em 0;
+}
+.section-title-input {
+    flex-grow: 1;
+}
+.section-item-actions {
+    display: flex;
+    gap: 0.5em;
+}
+.section-item-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text-muted-color);
+    padding: 0.2em 0.4em;
+}
+.section-item-actions .btn-remove-section:hover {
+    color: var(--danger-color);
+}
+.section-item-actions .btn-edit-section:hover,
+.section-item-actions .btn-save-section:hover {
+    color: var(--primary-color);
+}
+
+.add-section-container {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.2em;
+    margin-top: 1em;
+}
+.add-section-label {
+    font-weight: 600;
+    margin-bottom: 0.75em;
+    display: block;
+}
+.quick-add-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin-bottom: 1em;
+}
+.quick-add-pill {
+    background: var(--background-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted-color);
+    border-radius: 50px;
+    padding: 0.4em 1em;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.quick-add-pill:hover {
+    background: var(--light-gray-color);
+    color: var(--text-color);
+    border-color: var(--text-muted-color);
+}
+.custom-add-section {
+    display: flex;
+    gap: 0.5em;
+}
+.custom-add-section input {
+    flex-grow: 1;
 }
 
 /* --- Google Maps Autocomplete Styles --- */
