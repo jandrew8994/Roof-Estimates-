@@ -89,6 +89,7 @@ const signUpForm = document.getElementById('signup-form') as HTMLFormElement;
 // --- STATE ---
 let ai: GoogleGenAI | null = null;
 const REPORT_HISTORY_KEY = 'roofReportHistory';
+const RECENT_SEARCHES_KEY = 'roofReportRecentSearches';
 const PROFILE_DATA_KEY = 'contractorProfile';
 const TEMPLATE_DATA_KEY = 'reportTemplates';
 
@@ -156,6 +157,29 @@ function getReportHistory(): Report[] {
 }
 
 /**
+ * Retrieves recent searches from localStorage.
+ * @returns An array of address strings.
+ */
+function getRecentSearches(): string[] {
+    const searchesJson = localStorage.getItem(RECENT_SEARCHES_KEY);
+    return searchesJson ? JSON.parse(searchesJson) : [];
+}
+
+/**
+ * Saves a new address to the recent searches list in localStorage.
+ * @param address The address to save.
+ */
+function saveToRecentSearches(address: string) {
+    let searches = getRecentSearches();
+    // Remove existing instance to move it to the front
+    searches = searches.filter(s => s.toLowerCase() !== address.toLowerCase());
+    // Add to the front
+    searches.unshift(address);
+    // Keep only the 5 most recent unique searches
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(searches.slice(0, 5)));
+}
+
+/**
  * Saves a new report to the localStorage history.
  * @param report The new report object to save.
  * @returns The newly created report object with ID and timestamp.
@@ -198,6 +222,8 @@ function saveReportToHistory(report: Omit<Report, 'id' | 'timestamp' | 'customDa
 
     history.unshift(newReport); // Add to the beginning
     localStorage.setItem(REPORT_HISTORY_KEY, JSON.stringify(history));
+
+    saveToRecentSearches(newReport.address);
     
     historyNavLink.classList.remove('hidden');
     
@@ -441,16 +467,40 @@ function renderLandingPage() {
  */
 function renderAddressInput() {
     const templates = getTemplates();
+    const recentSearches = getRecentSearches();
+
+    const recentSearchesHtml = recentSearches.length > 0 ? `
+        <div class="recent-searches-container">
+            <h3>Recent Searches</h3>
+            <div class="recent-searches-list">
+                ${recentSearches.map(address => `<button class="recent-search-item" data-address="${address}">${address}</button>`).join('')}
+            </div>
+        </div>
+    ` : '';
+
     mainContent.innerHTML = `
         <section class="report-generator-view">
             <div class="container">
                 <div class="address-form-container">
                     <h1>Generate a New Roof Report</h1>
-                    <p>Enter the property address below to get started.</p>
+                    <p>Enter a property address below, or use your current location.</p>
                     <form id="address-form">
                         <div class="form-group">
                             <label for="address-input">Property Address</label>
-                            <input type="text" id="address-input" placeholder="e.g., 123 Maple St, Anytown, USA" required />
+                            <div class="address-input-group">
+                                <div class="address-input-wrapper">
+                                    <svg id="address-input-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                      <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                                    </svg>
+                                    <input type="text" id="address-input" placeholder="e.g., 123 Maple St, Anytown, USA" required />
+                                </div>
+                                <button type="button" id="use-location-btn" class="btn-icon" aria-label="Use my current location">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                                      <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                                      <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM1.5 8a6.5 6.5 0 1 1 13 0 6.5 6.5 0 0 1-13 0z"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="template-select">Report Template (Optional)</label>
@@ -461,47 +511,50 @@ function renderAddressInput() {
                         </div>
                         <button type="submit" class="btn btn-primary btn-large">Get Report</button>
                     </form>
+                    ${recentSearchesHtml}
                 </div>
             </div>
         </section>
     `;
 
     document.getElementById('address-form')?.addEventListener('submit', handleAddressSubmit);
+    document.getElementById('use-location-btn')?.addEventListener('click', handleUseCurrentLocation);
+    document.querySelectorAll('.recent-search-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            const address = (e.target as HTMLElement).dataset.address;
+            if (address) {
+                (document.getElementById('address-input') as HTMLInputElement).value = address;
+                handleAddressSubmit(new Event('submit', { cancelable: true }));
+            }
+        });
+    });
     
     // --- Initialize Google Maps Autocomplete ---
     const initAutocomplete = () => {
         const addressInput = document.getElementById('address-input') as HTMLInputElement;
         if (!addressInput) return;
 
-        // Prevent form submission if user presses Enter key on an autocomplete suggestion.
         addressInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                // Check if the autocomplete suggestion dropdown is visible
                 const isPacVisible = document.querySelector('.pac-container:not([style*="display: none"])');
-                if (isPacVisible) {
-                    e.preventDefault();
-                }
+                if (isPacVisible) e.preventDefault();
             }
         });
 
-        // Check if the Google Maps script has loaded
-        if (window.google && window.google.maps && window.google.maps.places) {
+        if (window.google?.maps?.places) {
             const autocomplete = new window.google.maps.places.Autocomplete(addressInput, {
                 types: ['address'],
                 fields: ["formatted_address"]
             });
             autocomplete.addListener('place_changed', () => {
                 const place = autocomplete.getPlace();
-                if (place && place.formatted_address) {
-                    const address = place.formatted_address;
+                if (place?.formatted_address) {
                     const templateSelect = document.getElementById('template-select') as HTMLSelectElement;
                     const templateId = templateSelect.value ? Number(templateSelect.value) : undefined;
-                    // The input value is already set by autocomplete, so we just need to trigger the report.
-                    generateAndDisplayReport(address, templateId);
+                    generateAndDisplayReport(place.formatted_address, templateId);
                 }
             });
         } else {
-            // If not loaded, wait and try again
             setTimeout(initAutocomplete, 200);
         }
     };
@@ -1089,7 +1142,8 @@ function renderTemplateEditorView(template?: Template) {
     sectionsList.addEventListener('dragstart', e => {
         const target = (e.target as HTMLElement).closest('.custom-section-item');
         if (target) {
-            draggedItem = target;
+            // FIX: Cast the result of 'closest' from Element to HTMLElement to match the type of 'draggedItem'.
+            draggedItem = target as HTMLElement;
             // Use setTimeout to allow the browser to create the drag image before applying the class
             setTimeout(() => {
                 draggedItem!.classList.add('dragging');
@@ -1307,12 +1361,56 @@ function handleProfileSave(e: Event) {
  */
 async function handleAddressSubmit(e: Event) {
     e.preventDefault();
-    const form = e.target as HTMLFormElement;
+    const form = document.getElementById('address-form') as HTMLFormElement;
+    if (!form) return;
     const input = form.querySelector('#address-input') as HTMLInputElement;
     const templateSelect = form.querySelector('#template-select') as HTMLSelectElement;
     const address = input.value.trim();
     const templateId = templateSelect.value ? Number(templateSelect.value) : undefined;
     generateAndDisplayReport(address, templateId);
+}
+
+/**
+ * Handles using the browser's geolocation to find and set the user's address.
+ * @param e The button click event.
+ */
+async function handleUseCurrentLocation(e: Event) {
+    const button = e.currentTarget as HTMLButtonElement;
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+    }
+    
+    setButtonLoadingState(button, true, ''); // Show spinner inside icon button
+
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            if (!window.google?.maps?.Geocoder) {
+                alert("Mapping service not available.");
+                setButtonLoadingState(button, false, '');
+                return;
+            }
+            const geocoder = new window.google.maps.Geocoder();
+            const latlng = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+            };
+            geocoder.geocode({ location: latlng }, (results, status) => {
+                if (status === "OK" && results?.[0]) {
+                    const addressInput = document.getElementById('address-input') as HTMLInputElement;
+                    addressInput.value = results[0].formatted_address;
+                    addressInput.focus();
+                } else {
+                    alert("Could not determine address from your location. Please try again.");
+                }
+                setButtonLoadingState(button, false, '');
+            });
+        },
+        () => {
+            alert("Unable to retrieve your location. Please ensure location services are enabled in your browser and system settings.");
+            setButtonLoadingState(button, false, '');
+        }
+    );
 }
 
 /**
